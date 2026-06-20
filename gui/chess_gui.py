@@ -59,7 +59,7 @@ class ChessGUI(pyglet.window.Window):
         self.sounds = {}
         sound_files = {
             "move": ("move.mp3", 600, 0.08, 0.25),
-            "capture": ("capture.wav", 400, 0.12, 0.3),
+            "capture": ("anquan.mp3", 400, 0.12, 0.3),
             "check": ("chieu.mp3", 880, 0.15, 0.35),
         }
         for key, (fn, freq, dur, vol) in sound_files.items():

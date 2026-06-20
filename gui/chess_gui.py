@@ -4,75 +4,14 @@ from pyglet import shapes
 from pyglet.text import Label
 from pyglet.window import key, mouse
 from pathlib import Path
-import struct
-import math
-import wave as wav_module
 
-SQUARE_SIZE = 80
-BOARD_PX = SQUARE_SIZE * 8
-DASHBOARD_WIDTH = 200
-WINDOW_WIDTH = BOARD_PX + DASHBOARD_WIDTH
-WINDOW_HEIGHT = BOARD_PX
-
-LIGHT = (240, 217, 181)
-DARK = (181, 136, 99)
-HIGHLIGHT_FILL = (0, 200, 80, 50)
-HIGHLIGHT_BORDER = (0, 200, 80, 180)
-CAPTURE_FILL = (200, 50, 50, 50)
-CAPTURE_BORDER = (200, 50, 50, 180)
-CASTLE_FILL = (200, 180, 50, 50)
-CASTLE_BORDER = (200, 180, 50, 180)
-CHECK_FILL = (200, 30, 30, 120)
-DASHBOARD_BG = (50, 50, 50)
-BORDER_OUTER = (50, 30, 15)
-BORDER_INNER = (100, 70, 40)
-
-PIECE_IMAGES = {
-    "P": "wP.png", "N": "wN.png", "B": "wB.png",
-    "R": "wR.png", "Q": "wQ.png", "K": "wK.png",
-    "p": "bP.png", "n": "bN.png", "b": "bB.png",
-    "r": "bR.png", "q": "bQ.png", "k": "bK.png",
-}
-
-
-def _make_wav(filename, freq, duration, vol=0.3):
-    sr = 22050
-    n = int(sr * duration)
-    with wav_module.open(filename, 'w') as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(sr)
-        for i in range(n):
-            t = i / sr
-            v = int(vol * 32767 * math.sin(2 * math.pi * freq * t))
-            f.writeframes(struct.pack('<h', v))
-
-
-def _make_background_wav(filename, sr=22050, duration=10.0):
-    n = int(sr * duration)
-    freqs = [(130.81, 0.12), (164.81, 0.08), (196.00, 0.10),
-             (261.63, 0.06), (329.63, 0.04), (392.00, 0.05)]
-    fade = 0.3
-    with wav_module.open(filename, 'w') as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(sr)
-        for i in range(n):
-            t = i / sr
-            env = 1.0
-            if t < fade:
-                env = t / fade
-            elif t > duration - fade:
-                env = (duration - t) / fade
-            sample = sum(vol * math.sin(2 * math.pi * freq * t) for freq, vol in freqs)
-            sample *= env * 0.5
-            sample = max(-1, min(1, sample))
-            f.writeframes(struct.pack('<h', int(sample * 32767 * 0.4)))
+from . import constants as C
+from . import audio
 
 
 class ChessGUI(pyglet.window.Window):
     def __init__(self):
-        super().__init__(WINDOW_WIDTH, WINDOW_HEIGHT, "Chess AI")
+        super().__init__(C.WINDOW_WIDTH, C.WINDOW_HEIGHT, "Chess AI")
         self.state = "menu"
         self.board = chess.Board()
         self.selected_square = None
@@ -91,9 +30,15 @@ class ChessGUI(pyglet.window.Window):
         self.show_settings = False
         self.music_volume = 0.3
         self.music_player = None
+        self.time_white = 600.0
+        self.time_black = 600.0
+        self.clock_running = False
+        self.draw_offered_by = None
+        self.game_result = None
+        self.game_buttons = []
 
-        assets = Path(__file__).parent / "assets"
-        for sym, filename in PIECE_IMAGES.items():
+        assets = Path(__file__).parent.parent / "assets"
+        for sym, filename in C.PIECE_IMAGES.items():
             self.piece_textures[sym] = pyglet.image.load(str(assets / filename))
 
         self.board_texture = pyglet.image.load(str(assets / "chess.png"))
@@ -103,7 +48,7 @@ class ChessGUI(pyglet.window.Window):
         oy = (h - size) // 2
         self.board_region = self.board_texture.get_region(ox, oy, size, size)
 
-        self.sounds_dir = Path(__file__).parent / "sounds"
+        self.sounds_dir = Path(__file__).parent.parent / "sounds"
         self.sounds_dir.mkdir(exist_ok=True)
         self._init_sounds()
         self._init_background_music()
@@ -113,14 +58,14 @@ class ChessGUI(pyglet.window.Window):
     def _init_sounds(self):
         self.sounds = {}
         sound_files = {
-            "move": ("move.wav", 600, 0.08, 0.25),
+            "move": ("move.mp3", 600, 0.08, 0.25),
             "capture": ("capture.wav", 400, 0.12, 0.3),
-            "check": ("check.wav", 880, 0.15, 0.35),
+            "check": ("chieu.mp3", 880, 0.15, 0.35),
         }
         for key, (fn, freq, dur, vol) in sound_files.items():
             path = self.sounds_dir / fn
             if not path.exists():
-                _make_wav(str(path), freq, dur, vol)
+                audio.make_wav(str(path), freq, dur, vol)
             try:
                 self.sounds[key] = pyglet.media.load(str(path), streaming=False)
             except Exception:
@@ -129,7 +74,7 @@ class ChessGUI(pyglet.window.Window):
     def _init_background_music(self):
         path = self.sounds_dir / "background.wav"
         if not path.exists():
-            _make_background_wav(str(path))
+            audio.make_background_wav(str(path))
         try:
             source = pyglet.media.load(str(path), streaming=True)
             self.music_player = pyglet.media.Player()
@@ -166,8 +111,8 @@ class ChessGUI(pyglet.window.Window):
         if piece is None:
             return
         texture = self.piece_textures[piece.symbol()]
-        sprite = pyglet.sprite.Sprite(texture, x=self.drag_x - SQUARE_SIZE // 2,
-                                      y=self.drag_y - SQUARE_SIZE // 2)
+        sprite = pyglet.sprite.Sprite(texture, x=self.drag_x - C.SQUARE_SIZE // 2,
+                                      y=self.drag_y - C.SQUARE_SIZE // 2)
         sprite.opacity = 180
         sprite.draw()
 
@@ -183,9 +128,17 @@ class ChessGUI(pyglet.window.Window):
             self._handle_promotion_click(x, y)
             return
 
-        if x >= BOARD_PX:
+        if x >= C.BOARD_PX:
             self.selected_square = None
             self.legal_moves_for_selected.clear()
+            for btn in self.game_buttons:
+                bx, by, bw, bh = btn["rect"]
+                if bx <= x <= bx + bw and by <= y <= by + bh:
+                    self._handle_game_button(btn["action"])
+                    return
+            return
+
+        if self.board.is_game_over() or not self.clock_running or self.time_white <= 0 or self.time_black <= 0:
             return
 
         square = self.square_from_pos(x, y)
@@ -215,8 +168,8 @@ class ChessGUI(pyglet.window.Window):
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         if self.state == "menu" and self.show_settings:
             dw, dh = 380, 260
-            dialog_x = (BOARD_PX - dw) // 2
-            dialog_y = (BOARD_PX - dh) // 2
+            dialog_x = (C.BOARD_PX - dw) // 2
+            dialog_y = (C.BOARD_PX - dh) // 2
             bar_x = dialog_x + 40
             bar_y = dialog_y + dh - 115
             bar_w = dw - 80
@@ -227,6 +180,8 @@ class ChessGUI(pyglet.window.Window):
             return
         if self.state != "game":
             return
+        if self.board.is_game_over() or self.time_white <= 0 or self.time_black <= 0:
+            return
         if self.selected_square is not None:
             self.dragging = True
             self.drag_x = x
@@ -235,8 +190,11 @@ class ChessGUI(pyglet.window.Window):
     def on_mouse_release(self, x, y, button, modifiers):
         if self.state != "game":
             return
+        if self.board.is_game_over() or self.time_white <= 0 or self.time_black <= 0:
+            self.dragging = False
+            return
         if self.dragging and self.selected_square is not None:
-            if 0 <= x < BOARD_PX and 0 <= y < BOARD_PX:
+            if 0 <= x < C.BOARD_PX and 0 <= y < C.BOARD_PX:
                 square = self.square_from_pos(x, y)
                 if square is not None and square in self.legal_moves_for_selected:
                     self._execute_move(square)
@@ -310,23 +268,23 @@ class ChessGUI(pyglet.window.Window):
         self.promotion_moves = []
 
     def draw_menu(self):
-        shapes.Rectangle(0, 0, BOARD_PX, BOARD_PX, color=(30, 30, 30)).draw()
+        shapes.Rectangle(0, 0, C.BOARD_PX, C.BOARD_PX, color=(30, 30, 30)).draw()
 
-        cx = BOARD_PX // 2
+        cx = C.BOARD_PX // 2
         title = Label("CHESS AI", font_size=42,
-                      x=cx, y=BOARD_PX - 80,
+                      x=cx, y=C.BOARD_PX - 80,
                       anchor_x="center", anchor_y="center",
                       color=(240, 217, 181, 255))
         title.draw()
 
         subtitle = Label("Trí tuệ nhân tạo - Cờ Vua", font_size=16,
-                         x=cx, y=BOARD_PX - 130,
+                         x=cx, y=C.BOARD_PX - 130,
                          anchor_x="center", anchor_y="center",
                          color=(180, 180, 180, 255))
         subtitle.draw()
 
         btn_w, btn_h = 260, 55
-        btn_y_start = BOARD_PX // 2 + 40
+        btn_y_start = C.BOARD_PX // 2 + 40
         self.menu_buttons = []
 
         button_data = [
@@ -349,29 +307,29 @@ class ChessGUI(pyglet.window.Window):
 
 
 
-        shapes.Rectangle(BOARD_PX, 0, DASHBOARD_WIDTH, WINDOW_HEIGHT, color=DASHBOARD_BG).draw()
-        Label("Chess AI", font_size=18, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 20,
+        shapes.Rectangle(C.BOARD_PX, 0, C.DASHBOARD_WIDTH, C.WINDOW_HEIGHT, color=C.DASHBOARD_BG).draw()
+        Label("Chess AI", font_size=18, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 20,
               anchor_y="top", color=(255, 255, 255, 255)).draw()
-        Label("Chọn chế độ để bắt đầu", font_size=12, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 50,
+        Label("Chọn chế độ để bắt đầu", font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 50,
               anchor_y="top", color=(120, 120, 120, 255)).draw()
 
         if self.show_settings:
             self._draw_settings_dialog()
 
     def _draw_settings_dialog(self):
-        overlay = shapes.Rectangle(0, 0, BOARD_PX, BOARD_PX, color=(0, 0, 0, 160))
+        overlay = shapes.Rectangle(0, 0, C.BOARD_PX, C.BOARD_PX, color=(0, 0, 0, 160))
         overlay.draw()
 
         dw, dh = 380, 260
-        dx = (BOARD_PX - dw) // 2
-        dy = (BOARD_PX - dh) // 2
+        dx = (C.BOARD_PX - dw) // 2
+        dy = (C.BOARD_PX - dh) // 2
 
         shapes.Rectangle(dx, dy, dw, dh, color=(40, 40, 40, 240)).draw()
         shapes.BorderedRectangle(dx, dy, dw, dh, border=2,
                                  color=(40, 40, 40, 240),
                                  border_color=(180, 140, 100, 200)).draw()
 
-        cx = BOARD_PX // 2
+        cx = C.BOARD_PX // 2
         title = Label("Cài Đặt Âm Thanh", font_size=18,
                       x=cx, y=dy + dh - 30,
                       anchor_x="center", anchor_y="center",
@@ -450,6 +408,11 @@ class ChessGUI(pyglet.window.Window):
                     self.move_count = 0
                     self._clear_promotion()
                     self.state = "game"
+                    self.time_white = 600.0
+                    self.time_black = 600.0
+                    self.clock_running = True
+                    self.draw_offered_by = None
+                    self.game_result = None
                 return
 
     def _handle_settings_click(self, x, y):
@@ -464,8 +427,8 @@ class ChessGUI(pyglet.window.Window):
                 return
         # Click on volume bar
         dw, dh = 380, 260
-        dx = (BOARD_PX - dw) // 2
-        dy = (BOARD_PX - dh) // 2
+        dx = (C.BOARD_PX - dw) // 2
+        dy = (C.BOARD_PX - dh) // 2
         bar_x = dx + 40
         bar_y = dy + dh - 115
         bar_w = dw - 80
@@ -489,23 +452,44 @@ class ChessGUI(pyglet.window.Window):
             self.legal_moves_for_selected.clear()
             self.move_count = 0
             self._clear_promotion()
+            self.clock_running = False
+            self.draw_offered_by = None
+            self.game_result = None
         elif symbol == key.R:
             self.board.reset()
             self.selected_square = None
             self.legal_moves_for_selected.clear()
             self.move_count = 0
             self._clear_promotion()
+            self.time_white = 600.0
+            self.time_black = 600.0
+            self.clock_running = True
+            self.draw_offered_by = None
+            self.game_result = None
 
     def update(self, dt):
         if self.state == "menu":
             return
         if self.board.is_game_over():
+            self.clock_running = False
             return
+        if not self.clock_running:
+            return
+        if self.board.turn == chess.WHITE:
+            self.time_white -= dt
+            if self.time_white <= 0:
+                self.time_white = 0
+                self.clock_running = False
+        else:
+            self.time_black -= dt
+            if self.time_black <= 0:
+                self.time_black = 0
+                self.clock_running = False
 
     def draw_board(self):
-        shapes.Rectangle(-8, -8, BOARD_PX + 16, BOARD_PX + 16, color=BORDER_OUTER).draw()
-        shapes.Rectangle(-4, -4, BOARD_PX + 8, BOARD_PX + 8, color=BORDER_INNER).draw()
-        scale = BOARD_PX / self.board_region.width
+        shapes.Rectangle(-8, -8, C.BOARD_PX + 16, C.BOARD_PX + 16, color=C.BORDER_OUTER).draw()
+        shapes.Rectangle(-4, -4, C.BOARD_PX + 8, C.BOARD_PX + 8, color=C.BORDER_INNER).draw()
+        scale = C.BOARD_PX / self.board_region.width
         sprite = pyglet.sprite.Sprite(self.board_region)
         sprite.scale = scale
         sprite.draw()
@@ -513,26 +497,26 @@ class ChessGUI(pyglet.window.Window):
         if self.board.is_check():
             king_sq = self.board.king(self.board.turn)
             if king_sq is not None:
-                kx = chess.square_file(king_sq) * SQUARE_SIZE
-                ky = chess.square_rank(king_sq) * SQUARE_SIZE
-                shapes.Rectangle(kx, ky, SQUARE_SIZE, SQUARE_SIZE, color=CHECK_FILL).draw()
+                kx = chess.square_file(king_sq) * C.SQUARE_SIZE
+                ky = chess.square_rank(king_sq) * C.SQUARE_SIZE
+                shapes.Rectangle(kx, ky, C.SQUARE_SIZE, C.SQUARE_SIZE, color=C.CHECK_FILL).draw()
 
         for square in chess.SQUARES:
             col = chess.square_file(square)
             row = chess.square_rank(square)
-            x = col * SQUARE_SIZE
-            y = row * SQUARE_SIZE
+            x = col * C.SQUARE_SIZE
+            y = row * C.SQUARE_SIZE
             if square == self.selected_square:
-                shapes.Rectangle(x, y, SQUARE_SIZE, SQUARE_SIZE, color=HIGHLIGHT_FILL).draw()
-                self._draw_square_border(x, y, HIGHLIGHT_BORDER)
+                shapes.Rectangle(x, y, C.SQUARE_SIZE, C.SQUARE_SIZE, color=C.HIGHLIGHT_FILL).draw()
+                self._draw_square_border(x, y, C.HIGHLIGHT_BORDER)
             elif square in self.legal_moves_for_selected:
                 target = self.board.piece_at(square)
                 if target:
-                    shapes.Rectangle(x, y, SQUARE_SIZE, SQUARE_SIZE, color=CAPTURE_FILL).draw()
-                    self._draw_square_border(x, y, CAPTURE_BORDER)
+                    shapes.Rectangle(x, y, C.SQUARE_SIZE, C.SQUARE_SIZE, color=C.CAPTURE_FILL).draw()
+                    self._draw_square_border(x, y, C.CAPTURE_BORDER)
                 else:
-                    shapes.Rectangle(x, y, SQUARE_SIZE, SQUARE_SIZE, color=HIGHLIGHT_FILL).draw()
-                    self._draw_square_border(x, y, HIGHLIGHT_BORDER)
+                    shapes.Rectangle(x, y, C.SQUARE_SIZE, C.SQUARE_SIZE, color=C.HIGHLIGHT_FILL).draw()
+                    self._draw_square_border(x, y, C.HIGHLIGHT_BORDER)
 
         if self.selected_square is not None:
             piece = self.board.piece_at(self.selected_square)
@@ -545,38 +529,38 @@ class ChessGUI(pyglet.window.Window):
                             rook_sq = chess.A1 if m.to_square == chess.C1 else chess.A8
                         else:
                             continue
-                        rx = chess.square_file(rook_sq) * SQUARE_SIZE
-                        ry = chess.square_rank(rook_sq) * SQUARE_SIZE
-                        shapes.Rectangle(rx, ry, SQUARE_SIZE, SQUARE_SIZE, color=CASTLE_FILL).draw()
-                        self._draw_square_border(rx, ry, CASTLE_BORDER)
+                        rx = chess.square_file(rook_sq) * C.SQUARE_SIZE
+                        ry = chess.square_rank(rook_sq) * C.SQUARE_SIZE
+                        shapes.Rectangle(rx, ry, C.SQUARE_SIZE, C.SQUARE_SIZE, color=C.CASTLE_FILL).draw()
+                        self._draw_square_border(rx, ry, C.CASTLE_BORDER)
 
         files = "abcdefgh"
         for col in range(8):
             Label(files[col], font_size=12,
-                  x=col * SQUARE_SIZE + SQUARE_SIZE // 2,
+                  x=col * C.SQUARE_SIZE + C.SQUARE_SIZE // 2,
                   y=4, anchor_x="center", anchor_y="bottom",
                   color=(0, 0, 0, 100)).draw()
             Label(files[col], font_size=12,
-                  x=col * SQUARE_SIZE + SQUARE_SIZE // 2,
-                  y=BOARD_PX - 4, anchor_x="center", anchor_y="top",
+                  x=col * C.SQUARE_SIZE + C.SQUARE_SIZE // 2,
+                  y=C.BOARD_PX - 4, anchor_x="center", anchor_y="top",
                   color=(0, 0, 0, 100)).draw()
 
         for row in range(8):
             Label(str(row + 1), font_size=12,
-                  x=4, y=row * SQUARE_SIZE + SQUARE_SIZE // 2,
+                  x=4, y=row * C.SQUARE_SIZE + C.SQUARE_SIZE // 2,
                   anchor_x="left", anchor_y="center",
                   color=(0, 0, 0, 100)).draw()
             Label(str(row + 1), font_size=12,
-                  x=BOARD_PX - 4, y=row * SQUARE_SIZE + SQUARE_SIZE // 2,
+                  x=C.BOARD_PX - 4, y=row * C.SQUARE_SIZE + C.SQUARE_SIZE // 2,
                   anchor_x="right", anchor_y="center",
                   color=(0, 0, 0, 100)).draw()
 
     def _draw_square_border(self, x, y, color):
         b = 3
-        shapes.Rectangle(x, y, SQUARE_SIZE, b, color=color).draw()
-        shapes.Rectangle(x, y + SQUARE_SIZE - b, SQUARE_SIZE, b, color=color).draw()
-        shapes.Rectangle(x, y, b, SQUARE_SIZE, color=color).draw()
-        shapes.Rectangle(x + SQUARE_SIZE - b, y, b, SQUARE_SIZE, color=color).draw()
+        shapes.Rectangle(x, y, C.SQUARE_SIZE, b, color=color).draw()
+        shapes.Rectangle(x, y + C.SQUARE_SIZE - b, C.SQUARE_SIZE, b, color=color).draw()
+        shapes.Rectangle(x, y, b, C.SQUARE_SIZE, color=color).draw()
+        shapes.Rectangle(x + C.SQUARE_SIZE - b, y, b, C.SQUARE_SIZE, color=color).draw()
 
     def draw_pieces(self):
         for square in chess.SQUARES:
@@ -587,77 +571,147 @@ class ChessGUI(pyglet.window.Window):
                 if self.dragging:
                     continue
                 sprite = pyglet.sprite.Sprite(self.piece_textures[piece.symbol()],
-                                              x=chess.square_file(square) * SQUARE_SIZE,
-                                              y=chess.square_rank(square) * SQUARE_SIZE)
+                                              x=chess.square_file(square) * C.SQUARE_SIZE,
+                                              y=chess.square_rank(square) * C.SQUARE_SIZE)
                 sprite.opacity = 100
                 sprite.draw()
             else:
                 col = chess.square_file(square)
                 row = chess.square_rank(square)
                 texture = self.piece_textures[piece.symbol()]
-                sprite = pyglet.sprite.Sprite(texture, x=col * SQUARE_SIZE, y=row * SQUARE_SIZE)
+                sprite = pyglet.sprite.Sprite(texture, x=col * C.SQUARE_SIZE, y=row * C.SQUARE_SIZE)
                 sprite.draw()
 
     def draw_dashboard(self):
-        rect = shapes.Rectangle(BOARD_PX, 0, DASHBOARD_WIDTH, WINDOW_HEIGHT, color=DASHBOARD_BG)
+        rect = shapes.Rectangle(C.BOARD_PX, 0, C.DASHBOARD_WIDTH, C.WINDOW_HEIGHT, color=C.DASHBOARD_BG)
         rect.draw()
 
-        title = Label("Chess AI", font_size=18, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 20,
+        title = Label("Chess AI", font_size=18, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 20,
                       anchor_y="top", color=(255, 255, 255, 255))
         title.draw()
 
-        mode_label = Label("Mode: PvP", font_size=12, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 50,
+        mode_label = Label("Mode: PvP", font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 50,
                            anchor_y="top", color=(200, 200, 200, 255))
         mode_label.draw()
 
-        moves = Label(f"Moves: {self.move_count}", font_size=12, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 80,
+        def fmt(t):
+            m = int(t // 60)
+            s = int(t % 60)
+            return f"{m:02d}:{s:02d}"
+
+        cw, ch = C.DASHBOARD_WIDTH - 20, 28
+        cx = C.BOARD_PX + 10
+
+        black_active = self.board.turn == chess.BLACK
+        white_active = self.board.turn == chess.WHITE
+
+        for active, label, seconds, y_pos in [
+            (black_active, "BLACK", self.time_black, C.WINDOW_HEIGHT - 80),
+            (white_active, "WHITE", self.time_white, C.WINDOW_HEIGHT - 112),
+        ]:
+            bg = (65, 55, 55) if active else (40, 40, 40)
+            if seconds <= 0:
+                bg = (120, 30, 30)
+            shapes.Rectangle(cx, y_pos, cw, ch, color=bg).draw()
+            shapes.BorderedRectangle(cx, y_pos, cw, ch, border=1,
+                                     color=bg,
+                                     border_color=(180, 140, 100, 200)).draw()
+            Label(label, font_size=11, x=cx + 6, y=y_pos + ch // 2,
+                  anchor_y="center", color=(200, 200, 200, 255)).draw()
+            Label(fmt(seconds), font_size=17 if active else 14,
+                  x=cx + cw - 6, y=y_pos + ch // 2,
+                  anchor_x="right", anchor_y="center",
+                  color=(255, 255, 255, 255)).draw()
+
+        moves = Label(f"Moves: {self.move_count}", font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 155,
                       anchor_y="top", color=(200, 200, 200, 255))
         moves.draw()
 
         turn = Label(f"Turn: {'White' if self.board.turn == chess.WHITE else 'Black'}",
-                     font_size=12, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 110,
+                     font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 180,
                      anchor_y="top", color=(200, 200, 200, 255))
         turn.draw()
 
         vol_label = Label(f"Music: {int(self.music_volume * 100)}%",
-                          font_size=12, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 140,
+                          font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 205,
                           anchor_y="top", color=(200, 200, 200, 255))
         vol_label.draw()
 
-        reset_label = Label("R: Reset  |  ESC: Menu", font_size=11, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 170,
+        reset_label = Label("R: Reset  |  ESC: Menu", font_size=11, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 230,
                             anchor_y="top", color=(150, 150, 150, 255))
         reset_label.draw()
 
-        if self.board.is_game_over():
-            result = Label("Game Over", font_size=16, x=BOARD_PX + 10, y=WINDOW_HEIGHT - 210,
-                           anchor_y="top", color=(255, 100, 100, 255))
-            result.draw()
+        if self.board.is_game_over() or (not self.clock_running and self.state == "game"):
+            reason = ""
+            if self.game_result:
+                reason = self.game_result
+            elif self.time_white <= 0:
+                reason = "Black wins (time)"
+            elif self.time_black <= 0:
+                reason = "White wins (time)"
+            elif self.board.is_checkmate():
+                reason = f"{'Black' if self.board.turn == chess.WHITE else 'White'} wins"
+            elif self.board.is_stalemate():
+                reason = "Stalemate"
+            elif self.board.is_insufficient_material():
+                reason = "Draw (material)"
+            elif self.board.can_claim_draw():
+                reason = "Draw"
+            if reason:
+                y = C.WINDOW_HEIGHT - 265
+                shapes.Rectangle(C.BOARD_PX + 5, y - 5, C.DASHBOARD_WIDTH - 10, 30,
+                                 color=(40, 30, 30)).draw()
+                Label(reason, font_size=13, x=C.BOARD_PX + 10, y=y,
+                      anchor_y="top", color=(255, 100, 100, 255)).draw()
+
+        self.game_buttons = []
+        btn_w, btn_h = C.DASHBOARD_WIDTH - 20, 36
+        btn_x = C.BOARD_PX + 10
+        btn_data = [
+            ("Đầu hàng", (180, 70, 70)),
+            ("Cầu hòa", (70, 130, 180)),
+        ]
+        for i, (text, clr) in enumerate(btn_data):
+            by = 90 - i * (btn_h + 8)
+            self.game_buttons.append({"rect": (btn_x, by, btn_w, btn_h), "action": text})
+            shapes.BorderedRectangle(btn_x, by, btn_w, btn_h, border=2,
+                                     color=(*clr, 200),
+                                     border_color=(*clr, 200)).draw()
+            Label(text, font_size=14,
+                  x=btn_x + btn_w // 2, y=by + btn_h // 2,
+                  anchor_x="center", anchor_y="center",
+                  color=(255, 255, 255, 255)).draw()
+
+        if self.draw_offered_by:
+            offer_text = f"{self.draw_offered_by.capitalize()} offered draw"
+            Label(offer_text, font_size=11, x=C.BOARD_PX + 10, y=130,
+                  anchor_y="top", color=(255, 220, 100, 255)).draw()
 
     def draw_promotion_dialog(self):
-        overlay = shapes.Rectangle(0, 0, BOARD_PX, BOARD_PX, color=(0, 0, 0, 150))
+        overlay = shapes.Rectangle(0, 0, C.BOARD_PX, C.BOARD_PX, color=(0, 0, 0, 150))
         overlay.draw()
 
         pieces = ["Q", "R", "B", "N"]
         labels = ["Hậu", "Xe", "Tượng", "Mã"]
-        dialog_y = BOARD_PX // 2 - SQUARE_SIZE // 2
-        dialog_x = BOARD_PX // 2 - 2 * SQUARE_SIZE
+        dialog_y = C.BOARD_PX // 2 - C.SQUARE_SIZE // 2
+        dialog_x = C.BOARD_PX // 2 - 2 * C.SQUARE_SIZE
 
         bg = shapes.Rectangle(dialog_x - 10, dialog_y - 10,
-                               4 * SQUARE_SIZE + 20, SQUARE_SIZE + 60,
+                               4 * C.SQUARE_SIZE + 20, C.SQUARE_SIZE + 60,
                                color=(30, 30, 30, 230))
         bg.draw()
 
         title = Label("Phong cấp - Chọn quân:", font_size=14,
-                      x=BOARD_PX // 2, y=dialog_y + SQUARE_SIZE + 25,
+                      x=C.BOARD_PX // 2, y=dialog_y + C.SQUARE_SIZE + 25,
                       anchor_x="center", anchor_y="center",
                       color=(255, 255, 255, 255))
         title.draw()
 
         is_white = self.board.turn == chess.WHITE
         for i, sym in enumerate(pieces):
-            px = dialog_x + i * SQUARE_SIZE
+            px = dialog_x + i * C.SQUARE_SIZE
             py = dialog_y
-            box = shapes.BorderedRectangle(px, py, SQUARE_SIZE, SQUARE_SIZE,
+            box = shapes.BorderedRectangle(px, py, C.SQUARE_SIZE, C.SQUARE_SIZE,
                                            color=(60, 60, 60, 200),
                                            border_color=(200, 200, 200, 200),
                                            border=2)
@@ -667,13 +721,13 @@ class ChessGUI(pyglet.window.Window):
             sprite = pyglet.sprite.Sprite(texture, x=px, y=py)
             sprite.draw()
             name_label = Label(labels[i], font_size=10,
-                               x=px + SQUARE_SIZE // 2, y=py - 12,
+                               x=px + C.SQUARE_SIZE // 2, y=py - 12,
                                anchor_x="center", anchor_y="center",
                                color=(200, 200, 200, 255))
             name_label.draw()
 
         hint = Label("Click vào quân muốn phong cấp", font_size=11,
-                     x=BOARD_PX // 2, y=dialog_y - 35,
+                     x=C.BOARD_PX // 2, y=dialog_y - 35,
                      anchor_x="center", anchor_y="center",
                      color=(180, 180, 180, 255))
         hint.draw()
@@ -699,18 +753,37 @@ class ChessGUI(pyglet.window.Window):
 
     def _promotion_sym_at_pos(self, x, y):
         pieces = ["Q", "R", "B", "N"]
-        dialog_y = BOARD_PX // 2 - SQUARE_SIZE // 2
-        dialog_x = BOARD_PX // 2 - 2 * SQUARE_SIZE
+        dialog_y = C.BOARD_PX // 2 - C.SQUARE_SIZE // 2
+        dialog_x = C.BOARD_PX // 2 - 2 * C.SQUARE_SIZE
         for i, sym in enumerate(pieces):
-            px = dialog_x + i * SQUARE_SIZE
+            px = dialog_x + i * C.SQUARE_SIZE
             py = dialog_y
-            if px <= x <= px + SQUARE_SIZE and py <= y <= py + SQUARE_SIZE:
+            if px <= x <= px + C.SQUARE_SIZE and py <= y <= py + C.SQUARE_SIZE:
                 return sym
         return None
 
+    def _handle_game_button(self, action):
+        if self.board.is_game_over() or not self.clock_running:
+            return
+        if action == "Đầu hàng":
+            winner = "Black" if self.board.turn == chess.WHITE else "White"
+            self.game_result = f"{winner} wins (surrender)"
+            self.clock_running = False
+            self.draw_offered_by = None
+        elif action == "Cầu hòa":
+            turn = "white" if self.board.turn == chess.WHITE else "black"
+            if self.draw_offered_by is None:
+                self.draw_offered_by = turn
+            elif self.draw_offered_by == turn:
+                self.draw_offered_by = None
+            else:
+                self.game_result = "Draw (agreement)"
+                self.clock_running = False
+                self.draw_offered_by = None
+
     def square_from_pos(self, x, y):
-        col = int(x // SQUARE_SIZE)
-        row = int(y // SQUARE_SIZE)
+        col = int(x // C.SQUARE_SIZE)
+        row = int(y // C.SQUARE_SIZE)
         if 0 <= col < 8 and 0 <= row < 8:
             return chess.square(col, row)
         return None

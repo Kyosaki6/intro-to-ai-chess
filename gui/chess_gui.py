@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import constants as C
 from . import audio
+from search import get_best_move
 
 
 class ChessGUI(pyglet.window.Window):
@@ -36,6 +37,8 @@ class ChessGUI(pyglet.window.Window):
         self.draw_offered_by = None
         self.game_result = None
         self.game_buttons = []
+        self.ai_color = chess.BLACK
+        self.ai_thinking = False
 
         assets = Path(__file__).parent.parent / "assets"
         for sym, filename in C.PIECE_IMAGES.items():
@@ -261,11 +264,35 @@ class ChessGUI(pyglet.window.Window):
         else:
             self._play_sound("move")
 
+        if self.mode == "pva" and not self.board.is_game_over() and not self.ai_thinking:
+            self.ai_thinking = True
+            pyglet.clock.schedule_once(lambda dt: self._do_ai_move(), 0.1)
+
     def _clear_promotion(self):
         self.promotion_pending = False
         self.promotion_from_sq = None
         self.promotion_to_sq = None
         self.promotion_moves = []
+
+    def _do_ai_move(self):
+        if self.board.is_game_over():
+            self.ai_thinking = False
+            return
+        move = get_best_move(self.board, depth=3)
+        self.ai_thinking = False
+        if move is None:
+            return
+        captured = self.board.piece_at(move.to_square) is not None
+        self.board.push(move)
+        self.move_count += 1
+        self.selected_square = None
+        self.legal_moves_for_selected.clear()
+        if self.board.is_check():
+            self._play_sound("check")
+        elif captured:
+            self._play_sound("capture")
+        else:
+            self._play_sound("move")
 
     def draw_menu(self):
         shapes.Rectangle(0, 0, C.BOARD_PX, C.BOARD_PX, color=(30, 30, 30)).draw()
@@ -289,6 +316,7 @@ class ChessGUI(pyglet.window.Window):
 
         button_data = [
             ("2 Người Chơi", "pvp"),
+            ("🤖 Đấu với Máy", "pva"),
             ("⚙ Cài Đặt", "settings"),
         ]
 
@@ -413,6 +441,9 @@ class ChessGUI(pyglet.window.Window):
                     self.clock_running = True
                     self.draw_offered_by = None
                     self.game_result = None
+                    self.ai_thinking = False
+                    if self.mode == "pva" and self.board.turn == self.ai_color:
+                        pyglet.clock.schedule_once(lambda dt: self._do_ai_move(), 0.1)
                 return
 
     def _handle_settings_click(self, x, y):
@@ -590,7 +621,8 @@ class ChessGUI(pyglet.window.Window):
                       anchor_y="top", color=(255, 255, 255, 255))
         title.draw()
 
-        mode_label = Label("Mode: PvP", font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 50,
+        mode_text = "Mode: PvP" if self.mode == "pvp" else "Mode: PvA"
+        mode_label = Label(mode_text, font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 50,
                            anchor_y="top", color=(200, 200, 200, 255))
         mode_label.draw()
 
@@ -750,6 +782,10 @@ class ChessGUI(pyglet.window.Window):
                     self._play_sound("move")
                 break
         self._clear_promotion()
+
+        if self.mode == "pva" and not self.board.is_game_over() and not self.ai_thinking:
+            self.ai_thinking = True
+            pyglet.clock.schedule_once(lambda dt: self._do_ai_move(), 0.1)
 
     def _promotion_sym_at_pos(self, x, y):
         pieces = ["Q", "R", "B", "N"]

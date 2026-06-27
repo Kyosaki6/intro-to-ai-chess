@@ -7,6 +7,7 @@ import search
 ENGINE_NAME = "ChessAI-Minimax"
 ENGINE_AUTHOR = "IntroAI"
 DEFAULT_DEPTH = 3
+MAX_MOVES_ESTIMATE = 40
 
 
 def main():
@@ -32,9 +33,6 @@ def main():
 
         elif line == "ucinewgame":
             board = chess.Board()
-
-        elif line == "stop":
-            print("bestmove 0000", flush=True)
 
         elif line == "quit":
             break
@@ -63,16 +61,19 @@ def main():
         elif line.startswith("go"):
             args = line.split()
             go_depth = depth
+            time_limit = None
+
             if "depth" in args:
                 go_depth = int(args[args.index("depth") + 1])
             elif "movetime" in args:
                 ms = int(args[args.index("movetime") + 1])
-                go_depth = _time_to_depth(ms)
+                time_limit = ms / 1000.0
             elif "wtime" in args or "btime" in args:
-                go_depth = _time_control_to_depth(args)
+                time_limit = _calculate_time_limit(args)
 
-            print(f"info string Searching depth {go_depth}...", flush=True)
-            move = search.get_best_move(board, depth=go_depth)
+            print(f"info string Searching depth={go_depth}{' time=' + str(time_limit) + 's' if time_limit else ''}...",
+                  flush=True)
+            move = search.get_best_move(board, depth=go_depth, time_limit=time_limit)
             print(f"info string Nodes searched: {search.NODES_SEARCHED}", flush=True)
             if move:
                 print(f"bestmove {move.uci()}", flush=True)
@@ -86,30 +87,26 @@ def main():
                 if idx < len(parts):
                     try:
                         depth = int(parts[idx])
-                        print(f"info string Depth set to {depth}", flush=True)
                     except ValueError:
                         pass
 
 
-def _time_to_depth(ms: int) -> int:
-    if ms >= 5000:
-        return 4
-    elif ms >= 2000:
-        return 3
-    elif ms >= 500:
-        return 2
-    return 1
-
-
-def _time_control_to_depth(args: list) -> int:
+def _calculate_time_limit(args: list) -> float:
     time_map = {}
-    for key in ("wtime", "btime", "movetime"):
+    for key in ("wtime", "btime", "inc", "movetime"):
         if key in args:
             time_map[key] = int(args[args.index(key) + 1])
-    remaining = time_map.get("movetime") or min(
-        time_map.get("wtime", 999999), time_map.get("btime", 999999)
+
+    if "movetime" in time_map:
+        return time_map["movetime"] / 1000.0
+
+    remaining = min(
+        time_map.get("wtime", 999999),
+        time_map.get("btime", 999999),
     )
-    return _time_to_depth(remaining // 60 if remaining > 60000 else remaining)
+    increment = time_map.get("inc", 0)
+    budget = remaining / MAX_MOVES_ESTIMATE + increment
+    return budget / 1000.0
 
 
 if __name__ == "__main__":

@@ -278,7 +278,7 @@ class ChessGUI(pyglet.window.Window):
         if self.board.is_game_over():
             self.ai_thinking = False
             return
-        move = get_best_move(self.board, depth=3)
+        move = get_best_move(self.board, depth=3, time_limit=2.0)
         self.ai_thinking = False
         if move is None:
             return

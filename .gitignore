@@ -23,5 +23,12 @@ env/
 .DS_Store
 Thumbs.db
 
+# Agent instructions
+AGENTS.md
+
 # Logs
 *.log
+
+# Cute Chess
+*.AppImage
+*.pgn

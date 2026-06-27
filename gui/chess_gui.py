@@ -39,6 +39,7 @@ class ChessGUI(pyglet.window.Window):
         self.game_buttons = []
         self.ai_color = chess.BLACK
         self.ai_thinking = False
+        self.last_move_square = None
 
         assets = Path(__file__).parent.parent / "assets"
         for sym, filename in C.PIECE_IMAGES.items():
@@ -256,6 +257,7 @@ class ChessGUI(pyglet.window.Window):
         self.move_count += 1
         self.selected_square = None
         self.legal_moves_for_selected.clear()
+        self.last_move_square = target_sq
 
         if self.board.is_check():
             self._play_sound("check")
@@ -287,6 +289,7 @@ class ChessGUI(pyglet.window.Window):
         self.move_count += 1
         self.selected_square = None
         self.legal_moves_for_selected.clear()
+        self.last_move_square = move.to_square
         if self.board.is_check():
             self._play_sound("check")
         elif captured:
@@ -442,6 +445,7 @@ class ChessGUI(pyglet.window.Window):
                     self.draw_offered_by = None
                     self.game_result = None
                     self.ai_thinking = False
+                    self.last_move_square = None
                     if self.mode == "pva" and self.board.turn == self.ai_color:
                         pyglet.clock.schedule_once(lambda dt: self._do_ai_move(), 0.1)
                 return
@@ -531,6 +535,12 @@ class ChessGUI(pyglet.window.Window):
                 kx = chess.square_file(king_sq) * C.SQUARE_SIZE
                 ky = chess.square_rank(king_sq) * C.SQUARE_SIZE
                 shapes.Rectangle(kx, ky, C.SQUARE_SIZE, C.SQUARE_SIZE, color=C.CHECK_FILL).draw()
+
+        if self.last_move_square is not None and self.last_move_square != self.selected_square:
+            lx = chess.square_file(self.last_move_square) * C.SQUARE_SIZE
+            ly = chess.square_rank(self.last_move_square) * C.SQUARE_SIZE
+            shapes.Rectangle(lx, ly, C.SQUARE_SIZE, C.SQUARE_SIZE, color=C.LAST_MOVE_FILL).draw()
+            self._draw_square_border(lx, ly, C.LAST_MOVE_BORDER)
 
         for square in chess.SQUARES:
             col = chess.square_file(square)
@@ -776,6 +786,7 @@ class ChessGUI(pyglet.window.Window):
             if m.promotion == promo:
                 self.board.push(m)
                 self.move_count += 1
+                self.last_move_square = self.promotion_to_sq
                 if self.board.is_check():
                     self._play_sound("check")
                 else:

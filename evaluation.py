@@ -101,20 +101,23 @@ def evaluate_board(board: chess.Board) -> float:
     # 1. Optimization: iterate only pieces
     white_bishops = 0
     black_bishops = 0
-    piece_count = 0
     
+    # Calculate material for phase
+    total_material = 0
+    for piece in board.piece_map().values():
+        if piece.piece_type != chess.PAWN and piece.piece_type != chess.KING:
+            total_material += PIECE_VALUES[piece.piece_type]
+            
     for square, piece in board.piece_map().items():
-        piece_count += 1
-        
         # Material + PST
         material = PIECE_VALUES[piece.piece_type]
         sq_idx = square if piece.color == chess.WHITE else square ^ 56
         
         if piece.piece_type == chess.KING:
             # Tapered Evaluation for King
-            # Use piece count to determine phase (simplified)
-            # A full game starts with 32 pieces.
-            phase = max(0, min(1, (32 - piece_count) / 20))
+            # Use total material to determine phase
+            # Max material for major/minor pieces is 4000.
+            phase = max(0, min(1, (4000 - total_material) / 4000))
             mg = KING_TABLE_MIDGAME[sq_idx]
             eg = KING_TABLE_ENDGAME[sq_idx]
             position = int(mg * (1 - phase) + eg * phase)
@@ -132,8 +135,8 @@ def evaluate_board(board: chess.Board) -> float:
         if piece.piece_type == chess.ROOK:
             file = chess.square_file(square)
             # Check if any pawns on this file
-            pawns_on_file = board.pieces(chess.PAWN, piece.color) | board.pieces(chess.PAWN, not piece.color)
-            if not any(chess.square_file(p) == file for p in pawns_on_file):
+            all_pawns = board.pieces(chess.PAWN, chess.WHITE) | board.pieces(chess.PAWN, chess.BLACK)
+            if not any(chess.square_file(p) == file for p in all_pawns):
                 score += 20 if piece.color == chess.WHITE else -20
                 
     # Bishop pair bonus
@@ -141,6 +144,16 @@ def evaluate_board(board: chess.Board) -> float:
     if black_bishops >= 2: score -= 50
     
     # Mobility bonus
-    score += (len(list(board.legal_moves)) * 5) * (1 if board.turn == chess.WHITE else -1)
+    current_turn = board.turn
+    
+    board.turn = chess.WHITE
+    white_mobility = board.legal_moves.count()
+    
+    board.turn = chess.BLACK
+    black_mobility = board.legal_moves.count()
+    
+    board.turn = current_turn
+    
+    score += (white_mobility - black_mobility) * 5
     
     return score

@@ -27,8 +27,12 @@ def get_best_move(board: chess.Board, depth: int = 3,
     global NODES_SEARCHED
     NODES_SEARCHED = 0
 
+    legal_moves_list = list(board.legal_moves)
+    if not legal_moves_list:
+        return None
+
     is_maximizing = board.turn == chess.WHITE
-    best_move = None
+    best_move = legal_moves_list[0]
     start_time = time.time()
 
     for d in range(1, depth + 1):
@@ -39,7 +43,7 @@ def get_best_move(board: chess.Board, depth: int = 3,
         beta = float("inf")
         current_best = None
 
-        ordered_moves = _order_moves(board, board.legal_moves)
+        ordered_moves = _order_moves(board, legal_moves_list)
         if best_move is not None and ordered_moves:
             ordered_moves = [best_move] + [m for m in ordered_moves if m != best_move]
 
@@ -87,6 +91,8 @@ def minimax(board: chess.Board, depth: int, alpha: float, beta: float,
             if board.is_checkmate():
                 return -99999 - depth if board.turn == chess.WHITE else 99999 + depth
             return 0
+        if board.is_repetition(2) or board.can_claim_draw():
+            return 0.0
         return quiescence_search(board, alpha, beta, is_maximizing, ply=0)
 
     ordered_moves = _order_moves(board, board.legal_moves)
@@ -126,6 +132,8 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
         if board.is_checkmate():
             return -99999 + ply if board.turn == chess.WHITE else 99999 - ply
         return 0
+    if board.is_repetition(2) or board.can_claim_draw():
+        return 0.0
 
     if ply > MAX_Q_PLY:
         return evaluate_board(board)

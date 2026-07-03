@@ -7,6 +7,7 @@ NODES_SEARCHED = 0
 
 def _order_moves(board, moves):
     def _score(move):
+        score = 0
         if board.is_capture(move):
             attacker = board.piece_at(move.from_square)
             a_val = PIECE_VALUES[attacker.piece_type] if attacker else 0
@@ -15,10 +16,10 @@ def _order_moves(board, moves):
             else:
                 victim = board.piece_at(move.to_square)
                 victim_val = PIECE_VALUES[victim.piece_type] if victim else 0
-            return 10000 + victim_val * 10 - a_val
+            score = 10000 + victim_val * 10 - a_val
         if move.promotion:
-            return 5000 + PIECE_VALUES[move.promotion]
-        return 0
+            score += 5000 + PIECE_VALUES[move.promotion]
+        return score
     return sorted(moves, key=_score, reverse=True)
 
 
@@ -86,13 +87,14 @@ def minimax(board: chess.Board, depth: int, alpha: float, beta: float,
     global NODES_SEARCHED
     NODES_SEARCHED += 1
 
+    if board.is_repetition(2) or board.can_claim_draw():
+        return 0.0
+
     if depth == 0 or board.is_game_over():
         if board.is_game_over():
             if board.is_checkmate():
                 return -99999 - depth if board.turn == chess.WHITE else 99999 + depth
             return 0
-        if board.is_repetition(2) or board.can_claim_draw():
-            return 0.0
         return quiescence_search(board, alpha, beta, is_maximizing, ply=0)
 
     ordered_moves = _order_moves(board, board.legal_moves)
@@ -132,8 +134,6 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
         if board.is_checkmate():
             return -99999 + ply if board.turn == chess.WHITE else 99999 - ply
         return 0
-    if board.is_repetition(2) or board.can_claim_draw():
-        return 0.0
 
     if ply > MAX_Q_PLY:
         return evaluate_board(board)
@@ -146,7 +146,7 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
         if stand_pat > alpha:
             alpha = stand_pat
 
-        captures = [m for m in board.legal_moves if board.is_capture(m)]
+        captures = [m for m in board.legal_moves if board.is_capture(m) or m.promotion]
         captures = _order_moves(board, captures)
         for move in captures:
             attacker = board.piece_at(move.from_square)
@@ -155,9 +155,10 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
             else:
                 victim = board.piece_at(move.to_square)
                 victim_val = PIECE_VALUES[victim.piece_type] if victim else 0
-            if stand_pat + victim_val + DELTA_MARGIN < alpha:
+            gain = PIECE_VALUES[move.promotion] if move.promotion else 0
+            if stand_pat + victim_val + gain + DELTA_MARGIN < alpha:
                 continue
-            if attacker and victim_val < PIECE_VALUES[attacker.piece_type]:
+            if victim_val > 0 and attacker and victim_val < PIECE_VALUES[attacker.piece_type]:
                 if stand_pat + PIECE_VALUES[chess.PAWN] < alpha:
                     continue
             board.push(move)
@@ -174,7 +175,7 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
         if stand_pat < beta:
             beta = stand_pat
 
-        captures = [m for m in board.legal_moves if board.is_capture(m)]
+        captures = [m for m in board.legal_moves if board.is_capture(m) or m.promotion]
         captures = _order_moves(board, captures)
         for move in captures:
             attacker = board.piece_at(move.from_square)
@@ -183,9 +184,10 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
             else:
                 victim = board.piece_at(move.to_square)
                 victim_val = PIECE_VALUES[victim.piece_type] if victim else 0
-            if stand_pat - victim_val - DELTA_MARGIN > beta:
+            gain = PIECE_VALUES[move.promotion] if move.promotion else 0
+            if stand_pat - victim_val - gain - DELTA_MARGIN > beta:
                 continue
-            if attacker and victim_val < PIECE_VALUES[attacker.piece_type]:
+            if victim_val > 0 and attacker and victim_val < PIECE_VALUES[attacker.piece_type]:
                 if stand_pat - PIECE_VALUES[chess.PAWN] > beta:
                     continue
             board.push(move)

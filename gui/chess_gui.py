@@ -338,11 +338,12 @@ class ChessGUI(pyglet.window.Window):
             self.ai_thinking = False
             return
         move = get_best_move(self.board, depth=3, use_opening_book=self.use_opening_book)
-        self.ai_thinking = False
         if move is None:
+            self.ai_thinking = False
             return
         captured = self.board.piece_at(move.to_square) is not None
         self.board.push(move)
+        self.ai_thinking = False
         self.move_count += 1
         self.selected_square = None
         self.legal_moves_for_selected.clear()
@@ -726,6 +727,9 @@ class ChessGUI(pyglet.window.Window):
 
         m = self.board.pop()
         self.redo_stack.append(m)
+        if self.mode == "pva" and self.board.move_stack:
+            m = self.board.pop()
+            self.redo_stack.append(m)
         self.move_count = len(self.board.move_stack)
 
         self.selected_square = None
@@ -1111,13 +1115,14 @@ class ChessGUI(pyglet.window.Window):
         editor_actions = [
             ("Xóa bàn cờ", "clear"),
             ("Vị trí ban đầu", "reset"),
-            ("▶ Chơi từ đây", "play"),
+            ("▶ Đánh với người", "play_pvp"),
+            ("🤖 Đánh với máy", "play_pva"),
         ]
 
         for i, (text, action) in enumerate(editor_actions):
             by = btn_y_start - i * (btn_h + 6)
             self.editor_buttons.append({"rect": (btn_x, by, btn_w, btn_h), "action": action, "value": None})
-            clr = (70, 100, 70) if action == "play" else (60, 60, 60)
+            clr = (70, 100, 70) if action.startswith("play") else (60, 60, 60)
             shapes.BorderedRectangle(btn_x, by, btn_w, btn_h, border=2,
                                      color=(*clr, 200),
                                      border_color=(150, 150, 150, 200)).draw()
@@ -1238,9 +1243,9 @@ class ChessGUI(pyglet.window.Window):
                         self.board.reset()
                         self.editor_palette_piece = None
                         self.editor_selected_sq = None
-                    elif btn["action"] == "play":
+                    elif btn["action"] in ("play_pvp", "play_pva"):
                         self.state = "game"
-                        self.mode = "pvp"
+                        self.mode = "pvp" if btn["action"] == "play_pvp" else "pva"
                         self.selected_square = None
                         self.legal_moves_for_selected.clear()
                         self.move_count = 0
@@ -1257,6 +1262,8 @@ class ChessGUI(pyglet.window.Window):
                         self.redo_stack.clear()
                         self.editor_palette_piece = None
                         self.editor_selected_sq = None
+                        if self.mode == "pva" and self.board.turn == self.ai_color:
+                            pyglet.clock.schedule_once(lambda dt: self._do_ai_move(), 0.1)
                     return
             return
 

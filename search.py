@@ -54,7 +54,7 @@ def get_best_move(board: chess.Board, depth: int = 3,
     is_maximizing = board.turn == chess.WHITE
     best_move = legal_moves_list[0]
     start_time = time.time()
-    deadline = start_time + time_limit * 0.8 if time_limit else float("inf")
+    deadline = start_time + time_limit * 0.95 if time_limit else float("inf")
 
     for d in range(1, depth + 1):
         if time_limit is not None and time.time() - start_time > time_limit * 0.8 and d > 1:
@@ -135,7 +135,7 @@ def minimax(board: chess.Board, depth: int, alpha: float, beta: float,
         return quiescence_search(board, alpha, beta, is_maximizing, 0, deadline)
 
     ordered_moves = _order_moves(board, board.legal_moves)
-    if tt_entry and tt_entry.best_move:
+    if tt_entry and tt_entry.best_move and tt_entry.best_move in board.legal_moves:
         ordered_moves = [tt_entry.best_move] + [m for m in ordered_moves if m != tt_entry.best_move]
 
     if is_maximizing:

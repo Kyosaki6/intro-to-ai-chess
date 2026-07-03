@@ -1,8 +1,25 @@
 import chess
+from chess.polyglot import zobrist_hash
 import time
 from evaluation import evaluate_board, PIECE_VALUES
+from dataclasses import dataclass
+from typing import Optional
 
+
+class TimeoutException(Exception):
+    pass
+
+
+TT: dict = {}
 NODES_SEARCHED = 0
+
+
+@dataclass
+class TTEntry:
+    depth: int
+    score: float
+    flag: str
+    best_move: Optional[chess.Move]
 
 
 def _order_moves(board, moves):
@@ -25,8 +42,9 @@ def _order_moves(board, moves):
 
 def get_best_move(board: chess.Board, depth: int = 3,
                   time_limit: float | None = None) -> chess.Move | None:
-    global NODES_SEARCHED
+    global NODES_SEARCHED, TT
     NODES_SEARCHED = 0
+    TT.clear()
 
     legal_moves_list = list(board.legal_moves)
     if not legal_moves_list:
@@ -35,6 +53,7 @@ def get_best_move(board: chess.Board, depth: int = 3,
     is_maximizing = board.turn == chess.WHITE
     best_move = legal_moves_list[0]
     start_time = time.time()
+    deadline = start_time + time_limit * 0.8 if time_limit else float("inf")
 
     for d in range(1, depth + 1):
         if time_limit is not None and time.time() - start_time > time_limit * 0.8 and d > 1:
@@ -48,32 +67,34 @@ def get_best_move(board: chess.Board, depth: int = 3,
         if best_move is not None and ordered_moves:
             ordered_moves = [best_move] + [m for m in ordered_moves if m != best_move]
 
-        if is_maximizing:
-            best_score = -float("inf")
-            for move in ordered_moves:
-                board.push(move)
-                score = minimax(board, d - 1, alpha, beta, False)
-                board.pop()
-                if score > best_score:
-                    best_score = score
-                    current_best = move
-                alpha = max(alpha, score)
-                if beta <= alpha:
-                    break
-        else:
-            best_score = float("inf")
-            for move in ordered_moves:
-                board.push(move)
-                score = minimax(board, d - 1, alpha, beta, True)
-                board.pop()
-                if score < best_score:
-                    best_score = score
-                    current_best = move
-                beta = min(beta, score)
-                if beta <= alpha:
-                    break
-
-        best_move = current_best
+        try:
+            if is_maximizing:
+                best_score = -float("inf")
+                for move in ordered_moves:
+                    board.push(move)
+                    score = minimax(board, d - 1, alpha, beta, False, deadline)
+                    board.pop()
+                    if score > best_score:
+                        best_score = score
+                        current_best = move
+                    alpha = max(alpha, score)
+                    if beta <= alpha:
+                        break
+            else:
+                best_score = float("inf")
+                for move in ordered_moves:
+                    board.push(move)
+                    score = minimax(board, d - 1, alpha, beta, True, deadline)
+                    board.pop()
+                    if score < best_score:
+                        best_score = score
+                        current_best = move
+                    beta = min(beta, score)
+                    if beta <= alpha:
+                        break
+            best_move = current_best
+        except TimeoutException:
+            break
 
     return best_move
 
@@ -83,52 +104,81 @@ DELTA_MARGIN = PIECE_VALUES[chess.PAWN] + 50
 
 
 def minimax(board: chess.Board, depth: int, alpha: float, beta: float,
-            is_maximizing: bool) -> float:
+            is_maximizing: bool, deadline: float = float("inf")) -> float:
     global NODES_SEARCHED
     NODES_SEARCHED += 1
 
+    if NODES_SEARCHED & 0x3FF == 0 and time.time() > deadline:
+        raise TimeoutException
+
     if board.is_repetition(2) or board.can_claim_draw():
         return 0.0
+
+    key = zobrist_hash(board)
+    tt_entry = TT.get(key)
+    if tt_entry and tt_entry.depth >= depth:
+        if tt_entry.flag == "exact":
+            return tt_entry.score
+        elif tt_entry.flag == "lower":
+            alpha = max(alpha, tt_entry.score)
+        elif tt_entry.flag == "upper":
+            beta = min(beta, tt_entry.score)
+        if alpha >= beta:
+            return tt_entry.score
 
     if depth == 0 or board.is_game_over():
         if board.is_game_over():
             if board.is_checkmate():
                 return -99999 - depth if board.turn == chess.WHITE else 99999 + depth
             return 0
-        return quiescence_search(board, alpha, beta, is_maximizing, ply=0)
+        return quiescence_search(board, alpha, beta, is_maximizing, 0, deadline)
 
     ordered_moves = _order_moves(board, board.legal_moves)
+    if tt_entry and tt_entry.best_move:
+        ordered_moves = [tt_entry.best_move] + [m for m in ordered_moves if m != tt_entry.best_move]
 
     if is_maximizing:
         max_score = -float("inf")
+        best_move_in_node = None
         for move in ordered_moves:
             board.push(move)
-            score = minimax(board, depth - 1, alpha, beta, False)
+            score = minimax(board, depth - 1, alpha, beta, False, deadline)
             board.pop()
             if score > max_score:
                 max_score = score
+                best_move_in_node = move
             alpha = max(alpha, score)
             if beta <= alpha:
-                break
+                TT[key] = TTEntry(depth, max_score, "lower", best_move_in_node)
+                return max_score
+        TT[key] = TTEntry(depth, max_score, "exact", best_move_in_node)
         return max_score
     else:
         min_score = float("inf")
+        best_move_in_node = None
         for move in ordered_moves:
             board.push(move)
-            score = minimax(board, depth - 1, alpha, beta, True)
+            score = minimax(board, depth - 1, alpha, beta, True, deadline)
             board.pop()
             if score < min_score:
                 min_score = score
+                best_move_in_node = move
             beta = min(beta, score)
             if beta <= alpha:
-                break
+                TT[key] = TTEntry(depth, min_score, "upper", best_move_in_node)
+                return min_score
+        TT[key] = TTEntry(depth, min_score, "exact", best_move_in_node)
         return min_score
 
 
 def quiescence_search(board: chess.Board, alpha: float, beta: float,
-                      is_maximizing: bool, ply: int = 0) -> float:
+                      is_maximizing: bool, ply: int = 0,
+                      deadline: float = float("inf")) -> float:
     global NODES_SEARCHED
     NODES_SEARCHED += 1
+
+    if NODES_SEARCHED & 0x3FF == 0 and time.time() > deadline:
+        raise TimeoutException
 
     if board.is_game_over():
         if board.is_checkmate():
@@ -162,7 +212,7 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
                 if stand_pat + PIECE_VALUES[chess.PAWN] < alpha:
                     continue
             board.push(move)
-            score = quiescence_search(board, alpha, beta, False, ply + 1)
+            score = quiescence_search(board, alpha, beta, False, ply + 1, deadline)
             board.pop()
             if score >= beta:
                 return beta
@@ -191,7 +241,7 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
                 if stand_pat - PIECE_VALUES[chess.PAWN] > beta:
                     continue
             board.push(move)
-            score = quiescence_search(board, alpha, beta, True, ply + 1)
+            score = quiescence_search(board, alpha, beta, True, ply + 1, deadline)
             board.pop()
             if score <= alpha:
                 return alpha

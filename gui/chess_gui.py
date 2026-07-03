@@ -46,6 +46,9 @@ class ChessGUI(pyglet.window.Window):
         self.victory_text = None
         self.victory_time = 0.0
         self.redo_stack = []
+        self.game_time = 600
+        self.editor_palette_piece = None
+        self.editor_selected_sq = None
 
         assets = Path(__file__).parent.parent / "assets"
         for sym, filename in C.PIECE_IMAGES.items():
@@ -107,6 +110,12 @@ class ChessGUI(pyglet.window.Window):
         self.clear()
         if self.state == "menu":
             self.draw_menu()
+        elif self.state == "editor":
+            self.draw_board()
+            self.draw_pieces()
+            self.draw_editor()
+            if self.dragging and self.editor_palette_piece is not None:
+                self._draw_editor_dragged_piece()
         else:
             self.draw_board()
             self.draw_pieces()
@@ -128,12 +137,39 @@ class ChessGUI(pyglet.window.Window):
         sprite.opacity = 180
         sprite.draw()
 
+    def _draw_editor_dragged_piece(self):
+        if self.editor_palette_piece is None:
+            return
+        if self.editor_palette_piece == "__delete__":
+            cx = self.drag_x - C.SQUARE_SIZE // 2
+            cy = self.drag_y - C.SQUARE_SIZE // 2
+            shapes.Rectangle(cx, cy, C.SQUARE_SIZE, C.SQUARE_SIZE,
+                             color=(200, 60, 60, 120)).draw()
+            shapes.BorderedRectangle(cx, cy, C.SQUARE_SIZE, C.SQUARE_SIZE,
+                                     border=2,
+                                     color=(200, 60, 60, 120),
+                                     border_color=(255, 100, 100, 120)).draw()
+            Label("🗑", font_size=36,
+                  x=self.drag_x, y=self.drag_y,
+                  anchor_x="center", anchor_y="center",
+                  color=(255, 255, 255, 200)).draw()
+            return
+        texture = self.piece_textures[self.editor_palette_piece]
+        sprite = pyglet.sprite.Sprite(texture, x=self.drag_x - C.SQUARE_SIZE // 2,
+                                      y=self.drag_y - C.SQUARE_SIZE // 2)
+        sprite.opacity = 180
+        sprite.draw()
+
     def on_mouse_press(self, x, y, button, modifiers):
         if self.state == "menu":
             if self.show_settings:
                 self._handle_settings_click(x, y)
             else:
                 self._handle_menu_click(x, y)
+            return
+
+        if self.state == "editor":
+            self._handle_editor_click(x, y, button)
             return
 
         if self.promotion_pending:
@@ -178,6 +214,12 @@ class ChessGUI(pyglet.window.Window):
                 self.legal_moves_for_selected.clear()
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+        if self.state == "editor":
+            if self.editor_palette_piece is not None:
+                self.dragging = True
+                self.drag_x = x
+                self.drag_y = y
+            return
         if self.state == "menu" and self.show_settings:
             dw, dh = 380, 260
             dialog_x = (C.BOARD_PX - dw) // 2
@@ -200,6 +242,11 @@ class ChessGUI(pyglet.window.Window):
             self.drag_y = y
 
     def on_mouse_release(self, x, y, button, modifiers):
+        if self.state == "editor":
+            if self.dragging and self.editor_palette_piece is not None:
+                self._handle_editor_drop(x, y)
+            self.dragging = False
+            return
         if self.state != "game":
             return
         if self.board.is_game_over() or not self.clock_running or self.time_white <= 0 or self.time_black <= 0:
@@ -331,6 +378,7 @@ class ChessGUI(pyglet.window.Window):
         button_data = [
             ("2 Người Chơi", "pvp"),
             ("🤖 Đấu với Máy", "pva"),
+            ("✏ Board Editor", "editor"),
             ("⚙ Cài Đặt", "settings"),
         ]
 
@@ -462,6 +510,13 @@ class ChessGUI(pyglet.window.Window):
             if bx <= x <= bx + bw and by <= y <= by + bh:
                 if btn["mode"] == "settings":
                     self.show_settings = True
+                elif btn["mode"] == "editor":
+                    self.board.clear()
+                    self.selected_square = None
+                    self.legal_moves_for_selected.clear()
+                    self.state = "editor"
+                    self.editor_palette_piece = None
+                    self.editor_selected_sq = None
                 else:
                     self.mode = btn["mode"]
                     self.board.reset()
@@ -470,8 +525,8 @@ class ChessGUI(pyglet.window.Window):
                     self.move_count = 0
                     self._clear_promotion()
                     self.state = "game"
-                    self.time_white = 600.0
-                    self.time_black = 600.0
+                    self.time_white = self.game_time
+                    self.time_black = self.game_time
                     self.clock_running = True
                     self.draw_offered_by = None
                     self.game_result = None
@@ -516,6 +571,14 @@ class ChessGUI(pyglet.window.Window):
                     self.show_settings = False
                 return
             return
+
+        if self.state == "editor":
+            if symbol == key.ESCAPE:
+                self.state = "menu"
+                self.editor_palette_piece = None
+                self.editor_selected_sq = None
+            return
+
         if symbol == key.ESCAPE:
             self.show_settings = False
             self.state = "menu"
@@ -538,8 +601,8 @@ class ChessGUI(pyglet.window.Window):
             self.legal_moves_for_selected.clear()
             self.move_count = 0
             self._clear_promotion()
-            self.time_white = 600.0
-            self.time_black = 600.0
+            self.time_white = self.game_time
+            self.time_black = self.game_time
             self.clock_running = True
             self.draw_offered_by = None
             self.game_result = None
@@ -552,6 +615,10 @@ class ChessGUI(pyglet.window.Window):
             self._undo_move()
         elif symbol == key.X:
             self._redo_move()
+        elif symbol == key.GRAVE:
+            presets = [60, 180, 300, 600, 1800]
+            idx = presets.index(self.game_time) if self.game_time in presets else 3
+            self.game_time = presets[(idx + 1) % len(presets)]
 
     def update(self, dt):
         if self.state == "menu":
@@ -806,6 +873,11 @@ class ChessGUI(pyglet.window.Window):
                            anchor_y="top", color=(200, 200, 200, 255))
         mode_label.draw()
 
+        time_label = Label(f"Time: {self.game_time//60} ph", font_size=12,
+                           x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 75,
+                           anchor_y="top", color=(180, 200, 180, 255))
+        time_label.draw()
+
         def fmt(t):
             m = int(t // 60)
             s = int(t % 60)
@@ -818,8 +890,8 @@ class ChessGUI(pyglet.window.Window):
         white_active = self.board.turn == chess.WHITE
 
         for active, label, seconds, y_pos in [
-            (black_active, "BLACK", self.time_black, C.WINDOW_HEIGHT - 80),
-            (white_active, "WHITE", self.time_white, C.WINDOW_HEIGHT - 112),
+            (black_active, "BLACK", self.time_black, C.WINDOW_HEIGHT - 105),
+            (white_active, "WHITE", self.time_white, C.WINDOW_HEIGHT - 137),
         ]:
             bg = (65, 55, 55) if active else (40, 40, 40)
             if seconds <= 0:
@@ -835,27 +907,27 @@ class ChessGUI(pyglet.window.Window):
                   anchor_x="right", anchor_y="center",
                   color=(255, 255, 255, 255)).draw()
 
-        moves = Label(f"Moves: {self.move_count}", font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 155,
+        moves = Label(f"Moves: {self.move_count}", font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 180,
                       anchor_y="top", color=(200, 200, 200, 255))
         moves.draw()
 
         turn = Label(f"Turn: {'White' if self.board.turn == chess.WHITE else 'Black'}",
-                     font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 180,
+                     font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 205,
                      anchor_y="top", color=(200, 200, 200, 255))
         turn.draw()
 
         vol_label = Label(f"Music: {int(self.music_volume * 100)}%",
-                          font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 205,
+                          font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 230,
                           anchor_y="top", color=(200, 200, 200, 255))
         vol_label.draw()
 
         book_label = Label(f"Book: {'On' if self.use_opening_book else 'Off'}",
-                           font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 230,
+                           font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 255,
                            anchor_y="top",
                            color=(100, 200, 100, 255) if self.use_opening_book else (200, 100, 100, 255))
         book_label.draw()
 
-        reset_label = Label("R: Reset  |  ESC: Menu", font_size=11, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 255,
+        reset_label = Label("R: Reset  |  ESC: Menu", font_size=11, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 280,
                             anchor_y="top", color=(150, 150, 150, 255))
         reset_label.draw()
 
@@ -876,7 +948,7 @@ class ChessGUI(pyglet.window.Window):
             elif self.board.can_claim_draw():
                 reason = "Draw"
             if reason:
-                y = C.WINDOW_HEIGHT - 265
+                y = C.WINDOW_HEIGHT - 290
                 shapes.Rectangle(C.BOARD_PX + 5, y - 5, C.DASHBOARD_WIDTH - 10, 30,
                                  color=(40, 30, 30)).draw()
                 Label(reason, font_size=13, x=C.BOARD_PX + 10, y=y,
@@ -967,6 +1039,99 @@ class ChessGUI(pyglet.window.Window):
                      color=(180, 180, 180, 255))
         hint.draw()
 
+    def draw_editor(self):
+        shapes.Rectangle(C.BOARD_PX, 0, C.DASHBOARD_WIDTH, C.WINDOW_HEIGHT, color=C.DASHBOARD_BG).draw()
+
+        cx = C.BOARD_PX + C.DASHBOARD_WIDTH // 2
+
+        title = Label("✏ Board Editor", font_size=16,
+                      x=cx, y=C.WINDOW_HEIGHT - 20,
+                      anchor_x="center", anchor_y="top",
+                      color=(255, 255, 255, 255))
+        title.draw()
+
+        fen = self.board.fen()
+        fen_label = Label(fen[:50], font_size=9,
+                          x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 55,
+                          anchor_y="top", color=(180, 180, 180, 255),
+                          width=C.DASHBOARD_WIDTH - 20, multiline=True)
+        fen_label.draw()
+
+        # Piece palette
+        pal_y = C.WINDOW_HEIGHT - 120
+        pal_cols = 6
+        pal_size = 32
+        pal_gap = 3
+        pal_start_x = C.BOARD_PX + (C.DASHBOARD_WIDTH - pal_cols * (pal_size + pal_gap)) // 2
+
+        self.editor_buttons = []
+        white_symbols = ["K", "Q", "R", "B", "N", "P"]
+        black_symbols = ["k", "q", "r", "b", "n", "p"]
+
+        piece_scale = pal_size / 80.0
+
+        for row, symbols in enumerate([white_symbols, black_symbols]):
+            for col, sym in enumerate(symbols):
+                px = pal_start_x + col * (pal_size + pal_gap)
+                py = pal_y - row * (pal_size + pal_gap + 4)
+                is_selected = self.editor_palette_piece == sym
+                clr = (120, 150, 200, 200) if is_selected else (60, 60, 60, 200)
+                bdr = (200, 200, 200, 200) if is_selected else (120, 120, 120, 200)
+                shapes.BorderedRectangle(px, py, pal_size, pal_size, border=2,
+                                         color=clr,
+                                         border_color=bdr).draw()
+                spr = pyglet.sprite.Sprite(self.piece_textures[sym],
+                                           x=px, y=py)
+                spr.scale = piece_scale
+                spr.draw()
+                self.editor_buttons.append({"rect": (px, py, pal_size, pal_size), "action": "palette", "value": sym})
+
+        # Trash button
+        trash_y = pal_y - 2 * (pal_size + pal_gap + 4) - 14
+        trash_w = 60
+        trash_h = 34
+        trash_x = C.BOARD_PX + (C.DASHBOARD_WIDTH - trash_w) // 2
+        is_trash = self.editor_palette_piece == "__delete__"
+        trash_clr = (200, 70, 70, 220) if is_trash else (70, 60, 60, 200)
+        trash_bdr = (255, 120, 120, 220) if is_trash else (120, 120, 120, 200)
+        shapes.BorderedRectangle(trash_x, trash_y, trash_w, trash_h, border=2,
+                                 color=trash_clr,
+                                 border_color=trash_bdr).draw()
+        Label("🗑 Xóa", font_size=14,
+              x=trash_x + trash_w // 2, y=trash_y + trash_h // 2,
+              anchor_x="center", anchor_y="center",
+              color=(255, 255, 255, 255)).draw()
+        self.editor_buttons.append({"rect": (trash_x, trash_y, trash_w, trash_h), "action": "palette", "value": "__delete__"})
+
+        # Buttons
+        btn_w, btn_h = C.DASHBOARD_WIDTH - 20, 34
+        btn_x = C.BOARD_PX + 10
+        btn_y_start = pal_y - 2 * (pal_size + pal_gap + 4) - 65
+
+        editor_actions = [
+            ("Xóa bàn cờ", "clear"),
+            ("Vị trí ban đầu", "reset"),
+            ("▶ Chơi từ đây", "play"),
+        ]
+
+        for i, (text, action) in enumerate(editor_actions):
+            by = btn_y_start - i * (btn_h + 6)
+            self.editor_buttons.append({"rect": (btn_x, by, btn_w, btn_h), "action": action, "value": None})
+            clr = (70, 100, 70) if action == "play" else (60, 60, 60)
+            shapes.BorderedRectangle(btn_x, by, btn_w, btn_h, border=2,
+                                     color=(*clr, 200),
+                                     border_color=(150, 150, 150, 200)).draw()
+            Label(text, font_size=13,
+                  x=btn_x + btn_w // 2, y=by + btn_h // 2,
+                  anchor_x="center", anchor_y="center",
+                  color=(255, 255, 255, 255)).draw()
+
+        instruct = Label("Kéo palette thả vào bàn cờ\nChọn 🗑 rồi click/kéo để xóa",
+                         font_size=10, x=cx, y=30,
+                         anchor_x="center", anchor_y="center",
+                         color=(150, 150, 150, 255))
+        instruct.draw()
+
     def _handle_promotion_click(self, x, y):
         sym = self._promotion_sym_at_pos(x, y)
         if sym is None:
@@ -1030,9 +1195,88 @@ class ChessGUI(pyglet.window.Window):
                 self.draw_offered_by = None
                 self._determine_victory_text()
 
+    def _handle_editor_drop(self, x, y):
+        if x >= C.BOARD_PX:
+            return
+        square = self.square_from_pos(x, y)
+        if square is None:
+            return
+        sym = self.editor_palette_piece
+        if sym == "__delete__":
+            self.board.remove_piece_at(square)
+            return
+        color = chess.WHITE if sym.isupper() else chess.BLACK
+        piece_type_map = {
+            "K": chess.KING, "Q": chess.QUEEN, "R": chess.ROOK,
+            "B": chess.BISHOP, "N": chess.KNIGHT, "P": chess.PAWN,
+        }
+        pt = piece_type_map.get(sym.upper())
+        if pt is not None:
+            self.board.set_piece_at(square, chess.Piece(pt, color))
+
     def square_from_pos(self, x, y):
         col = int(x // C.SQUARE_SIZE)
         row = int(y // C.SQUARE_SIZE)
         if 0 <= col < 8 and 0 <= row < 8:
             return chess.square(col, row)
         return None
+
+    def _handle_editor_click(self, x, y, button):
+        # Check dashboard buttons
+        if x >= C.BOARD_PX:
+            for btn in self.editor_buttons:
+                bx, by, bw, bh = btn["rect"]
+                if bx <= x <= bx + bw and by <= y <= by + bh:
+                    if btn["action"] == "palette":
+                        self.editor_palette_piece = btn["value"]
+                        self.editor_selected_sq = None
+                    elif btn["action"] == "clear":
+                        self.board.clear()
+                        self.editor_palette_piece = None
+                        self.editor_selected_sq = None
+                    elif btn["action"] == "reset":
+                        self.board.reset()
+                        self.editor_palette_piece = None
+                        self.editor_selected_sq = None
+                    elif btn["action"] == "play":
+                        self.state = "game"
+                        self.mode = "pvp"
+                        self.selected_square = None
+                        self.legal_moves_for_selected.clear()
+                        self.move_count = 0
+                        self.time_white = 600.0
+                        self.time_black = 600.0
+                        self.clock_running = True
+                        self.draw_offered_by = None
+                        self.game_result = None
+                        self.ai_thinking = False
+                        self.last_move_square = None
+                        self.last_move_from_sq = None
+                        self.victory_text = None
+                        self.victory_time = 0.0
+                        self.redo_stack.clear()
+                        self.editor_palette_piece = None
+                        self.editor_selected_sq = None
+                    return
+            return
+
+        # Click on board
+        square = self.square_from_pos(x, y)
+        if square is None:
+            return
+
+        if button == mouse.RIGHT or self.editor_palette_piece == "__delete__":
+            self.board.remove_piece_at(square)
+            return
+
+        if self.editor_palette_piece is not None:
+            sym = self.editor_palette_piece
+            color = chess.WHITE if sym.isupper() else chess.BLACK
+            piece_type_map = {
+                "K": chess.KING, "Q": chess.QUEEN, "R": chess.ROOK,
+                "B": chess.BISHOP, "N": chess.KNIGHT, "P": chess.PAWN,
+            }
+            pt = piece_type_map.get(sym.upper())
+            if pt is not None:
+                self.board.set_piece_at(square, chess.Piece(pt, color))
+                self.editor_selected_sq = square

@@ -1,11 +1,18 @@
 import chess
 from evaluation import evaluate_board
+from opening_book import get_opening_move
 
 NODES_SEARCHED = 0
 
 
-def get_best_move(board: chess.Board, depth: int = 3) -> chess.Move:
+def get_best_move(board: chess.Board, depth: int = 3, use_opening_book: bool = True) -> chess.Move | None:
     global NODES_SEARCHED
+
+    if use_opening_book and not board.is_game_over():
+        book_move = get_opening_move(board)
+        if book_move is not None:
+            return book_move
+
     NODES_SEARCHED = 0
 
     is_maximizing = board.turn == chess.WHITE

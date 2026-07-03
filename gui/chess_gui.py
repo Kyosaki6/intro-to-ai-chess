@@ -38,6 +38,7 @@ class ChessGUI(pyglet.window.Window):
         self.game_result = None
         self.game_buttons = []
         self.ai_color = chess.BLACK
+        self.use_opening_book = True
         self.ai_thinking = False
         self.last_move_square = None
 
@@ -280,7 +281,7 @@ class ChessGUI(pyglet.window.Window):
         if self.board.is_game_over():
             self.ai_thinking = False
             return
-        move = get_best_move(self.board, depth=3)
+        move = get_best_move(self.board, depth=3, use_opening_book=self.use_opening_book)
         self.ai_thinking = False
         if move is None:
             return
@@ -411,6 +412,26 @@ class ChessGUI(pyglet.window.Window):
                   anchor_x="center", anchor_y="center",
                   color=(255, 255, 255, 255)).draw()
 
+        book_y = preset_y - 55
+        book_label = Label("Khai cuộc (Book):", font_size=13,
+                           x=cx - 60, y=book_y,
+                           anchor_x="center", anchor_y="center",
+                           color=(200, 200, 200, 255))
+        book_label.draw()
+
+        book_toggle_text = "Bật" if self.use_opening_book else "Tắt"
+        book_toggle_color = (70, 130, 70, 200) if self.use_opening_book else (100, 70, 70, 200)
+        toggle_x, toggle_y, toggle_w, toggle_h = cx + 30, book_y - 12, 60, 24
+        self.settings_buttons.append({"rect": (toggle_x, toggle_y, toggle_w, toggle_h),
+                                       "action": "toggle_book", "value": None})
+        shapes.BorderedRectangle(toggle_x, toggle_y, toggle_w, toggle_h, border=1,
+                                 color=book_toggle_color,
+                                 border_color=(150, 150, 150, 200)).draw()
+        Label(book_toggle_text, font_size=12,
+              x=toggle_x + toggle_w // 2, y=toggle_y + toggle_h // 2,
+              anchor_x="center", anchor_y="center",
+              color=(255, 255, 255, 255)).draw()
+
         close_y = dy + 15
         close_w, close_h = 80, 30
         cx_btn = dx + dw // 2
@@ -419,7 +440,7 @@ class ChessGUI(pyglet.window.Window):
         shapes.BorderedRectangle(cx_btn - close_w // 2, close_y, close_w, close_h,
                                  border=1,
                                  color=(80, 50, 50, 200),
-                                 border_color=(200, 100, 100, 200)).draw()
+                                 border_color=(180, 140, 100, 200)).draw()
         Label("✕ Đóng", font_size=12,
               x=cx_btn, y=close_y + close_h // 2,
               anchor_x="center", anchor_y="center",
@@ -459,6 +480,8 @@ class ChessGUI(pyglet.window.Window):
                 elif btn["action"] == "volume":
                     self.music_volume = btn["value"]
                     self._update_music_volume()
+                elif btn["action"] == "toggle_book":
+                    self.use_opening_book = not self.use_opening_book
                 return
         # Click on volume bar
         dw, dh = 380, 260
@@ -679,7 +702,13 @@ class ChessGUI(pyglet.window.Window):
                           anchor_y="top", color=(200, 200, 200, 255))
         vol_label.draw()
 
-        reset_label = Label("R: Reset  |  ESC: Menu", font_size=11, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 230,
+        book_label = Label(f"Book: {'On' if self.use_opening_book else 'Off'}",
+                           font_size=12, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 230,
+                           anchor_y="top",
+                           color=(100, 200, 100, 255) if self.use_opening_book else (200, 100, 100, 255))
+        book_label.draw()
+
+        reset_label = Label("R: Reset  |  ESC: Menu", font_size=11, x=C.BOARD_PX + 10, y=C.WINDOW_HEIGHT - 255,
                             anchor_y="top", color=(150, 150, 150, 255))
         reset_label.draw()
 

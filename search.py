@@ -44,7 +44,8 @@ def get_best_move(board: chess.Board, depth: int = 3,
                   time_limit: float | None = None) -> chess.Move | None:
     global NODES_SEARCHED, TT
     NODES_SEARCHED = 0
-    TT.clear()
+    if len(TT) > 1000000:
+        TT.clear()
 
     legal_moves_list = list(board.legal_moves)
     if not legal_moves_list:
@@ -138,6 +139,7 @@ def minimax(board: chess.Board, depth: int, alpha: float, beta: float,
         ordered_moves = [tt_entry.best_move] + [m for m in ordered_moves if m != tt_entry.best_move]
 
     if is_maximizing:
+        alpha_orig = alpha
         max_score = -float("inf")
         best_move_in_node = None
         for move in ordered_moves:
@@ -151,9 +153,11 @@ def minimax(board: chess.Board, depth: int, alpha: float, beta: float,
             if beta <= alpha:
                 TT[key] = TTEntry(depth, max_score, "lower", best_move_in_node)
                 return max_score
-        TT[key] = TTEntry(depth, max_score, "exact", best_move_in_node)
+        flag = "exact" if max_score > alpha_orig else "upper"
+        TT[key] = TTEntry(depth, max_score, flag, best_move_in_node)
         return max_score
     else:
+        beta_orig = beta
         min_score = float("inf")
         best_move_in_node = None
         for move in ordered_moves:
@@ -167,7 +171,8 @@ def minimax(board: chess.Board, depth: int, alpha: float, beta: float,
             if beta <= alpha:
                 TT[key] = TTEntry(depth, min_score, "upper", best_move_in_node)
                 return min_score
-        TT[key] = TTEntry(depth, min_score, "exact", best_move_in_node)
+        flag = "exact" if min_score < beta_orig else "lower"
+        TT[key] = TTEntry(depth, min_score, flag, best_move_in_node)
         return min_score
 
 

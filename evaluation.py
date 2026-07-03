@@ -1,11 +1,6 @@
-"""
-evaluation.py - Hàm đánh giá bàn cờ cho Engine cờ vua
-Tác giả: Person 2
-"""
-
 import chess
 
-# ---------- GIÁ TRỊ QUÂN CƠ ----------
+# ---------- MATERIAL VALUES ----------
 PIECE_VALUES = {
     chess.PAWN: 100,
     chess.KNIGHT: 320,
@@ -15,7 +10,7 @@ PIECE_VALUES = {
     chess.KING: 20000
 }
 
-# ---------- BẢN ĐỒ VỊ TRÍ (PST) ----------
+# ---------- PST TABLES ----------
 PAWN_PST = [
      0,  0,  0,  0,  0,  0,  0,  0,
     50, 50, 50, 50, 50, 50, 50, 50,
@@ -71,17 +66,7 @@ QUEEN_PST = [
     -20,-10,-10, -5, -5,-10,-10,-20
 ]
 
-KING_PST_ENDGAME = [
-    -50,-40,-30,-20,-20,-30,-40,-50,
-    -30,-20,-10,  0,  0,-10,-20,-30,
-    -30,-10, 20, 30, 30, 20,-10,-30,
-    -30,-10, 30, 40, 40, 30,-10,-30,
-    -30,-10, 30, 40, 40, 30,-10,-30,
-    -30,-10, 20, 30, 30, 20,-10,-30,
-    -30,-30,  0,  0,  0,  0,-30,-30,
-    -50,-30,-30,-30,-30,-30,-30,-50
-]
-
+# King PST – Midgame (hide near corners)
 KING_PST_MIDGAME = [
     -30,-20,-10,  0,  0,-10,-20,-30,
     -20,-10,  0, 10, 10,  0,-10,-20,
@@ -93,6 +78,18 @@ KING_PST_MIDGAME = [
     -30,-20,-10,  0,  0,-10,-20,-30
 ]
 
+# King PST – Endgame (active in center)
+KING_PST_ENDGAME = [
+    -50,-40,-30,-20,-20,-30,-40,-50,
+    -30,-20,-10,  0,  0,-10,-20,-30,
+    -30,-10, 20, 30, 30, 20,-10,-30,
+    -30,-10, 30, 40, 40, 30,-10,-30,
+    -30,-10, 30, 40, 40, 30,-10,-30,
+    -30,-10, 20, 30, 30, 20,-10,-30,
+    -30,-30,  0,  0,  0,  0,-30,-30,
+    -50,-30,-30,-30,-30,-30,-30,-50
+]
+
 PST = {
     chess.PAWN: PAWN_PST,
     chess.KNIGHT: KNIGHT_PST,
@@ -101,79 +98,88 @@ PST = {
     chess.QUEEN: QUEEN_PST,
 }
 
-# ---------- HÀM PHỤ TRỢ ----------
+# ---------- GAME PHASE (FIXED: no pawns) ----------
 def game_phase(board: chess.Board) -> float:
-    total_pieces = 0
-    for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
-        total_pieces += len(board.pieces(piece_type, chess.WHITE)) + len(board.pieces(piece_type, chess.BLACK))
-    phase = (total_pieces - 10) / 22
-    return max(0.0, min(1.0, phase))
+    """
+    Calculate phase using only minor/major pieces.
+    Max weight at start: 4 knights + 4 bishops + 4 rooks*2 + 2 queens*4 = 24
+    """
+    phase = 0.0
+    phase += len(board.pieces(chess.KNIGHT, chess.WHITE)) + len(board.pieces(chess.KNIGHT, chess.BLACK))
+    phase += len(board.pieces(chess.BISHOP, chess.WHITE)) + len(board.pieces(chess.BISHOP, chess.BLACK))
+    phase += (len(board.pieces(chess.ROOK, chess.WHITE)) + len(board.pieces(chess.ROOK, chess.BLACK))) * 2
+    phase += (len(board.pieces(chess.QUEEN, chess.WHITE)) + len(board.pieces(chess.QUEEN, chess.BLACK))) * 4
 
+    max_phase = 24.0
+    return max(0.0, min(1.0, phase / max_phase))
+
+# ---------- PST LOOKUP (with king tapering) ----------
 def get_pst(piece_type: int, square: int, color: bool, phase: float) -> int:
+    idx = square if color == chess.WHITE else square ^ 56
     if piece_type == chess.KING:
-        idx = square if color == chess.WHITE else square ^ 56
         mid = KING_PST_MIDGAME[idx]
         end = KING_PST_ENDGAME[idx]
         return int(mid * phase + end * (1 - phase))
     else:
-        table = PST[piece_type]
-        idx = square if color == chess.WHITE else square ^ 56
-        return table[idx]
+        return PST[piece_type][idx]
 
-# ---------- HÀM ĐÁNH GIÁ CHÍNH ----------
+# ---------- MAIN EVALUATION ----------
 def evaluate_board(board: chess.Board) -> float:
-    # Các trường hợp kết thúc
+    # Terminal states
     if board.is_checkmate():
-        return -float('inf') if board.turn == chess.WHITE else float('inf')
+        # Finite large constant – search will add/subtract depth to prefer shorter mates
+        return -99999.0 if board.turn == chess.WHITE else 99999.0
     if board.is_stalemate() or board.is_insufficient_material():
         return 0.0
 
     phase = game_phase(board)
     score = 0.0
 
-    # Duyệt quân cờ
+    # 1. Material + Positional (piece_map is fast)
     for square, piece in board.piece_map().items():
-        material = PIECE_VALUES[piece.piece_type]
-        position = get_pst(piece.piece_type, square, piece.color, phase)
-        if piece.color == chess.WHITE:
-            score += material + position
-        else:
-            score -= material + position
+        val = PIECE_VALUES[piece.piece_type] + get_pst(piece.piece_type, square, piece.color, phase)
+        score += val if piece.color == chess.WHITE else -val
 
-    # Bishop pair
+    # 2. Bishop pair
     if len(board.pieces(chess.BISHOP, chess.WHITE)) >= 2:
         score += 40
     if len(board.pieces(chess.BISHOP, chess.BLACK)) >= 2:
         score -= 40
 
-    # Rook on open file
+    # 3. Rook on open file – using bitboards (fast)
+    all_pawns = board.pieces(chess.PAWN, chess.WHITE) | board.pieces(chess.PAWN, chess.BLACK)
     for sq in board.pieces(chess.ROOK, chess.WHITE):
-        file = chess.square_file(sq)
-        has_pawn = any(
-            board.piece_at(s) and board.piece_at(s).piece_type == chess.PAWN
-            for s in chess.SquareSet(chess.BB_FILES[file])
-        )
-        if not has_pawn:
+        file_mask = chess.BB_FILES[chess.square_file(sq)]
+        if not (all_pawns & file_mask):
             score += 20
-
     for sq in board.pieces(chess.ROOK, chess.BLACK):
-        file = chess.square_file(sq)
-        has_pawn = any(
-            board.piece_at(s) and board.piece_at(s).piece_type == chess.PAWN
-            for s in chess.SquareSet(chess.BB_FILES[file])
-        )
-        if not has_pawn:
+        file_mask = chess.BB_FILES[chess.square_file(sq)]
+        if not (all_pawns & file_mask):
             score -= 20
 
-    # Mobility
-    white_mobility = 0
-    black_mobility = 0
-    for move in board.legal_moves:
-        if board.color_at(move.from_square) == chess.WHITE:
-            white_mobility += 1
-        else:
-            black_mobility += 1
-    score += (white_mobility - black_mobility) * 5
+    # 4. Pawn structure – doubled pawns
+    for file_idx in range(8):
+        file_mask = chess.BB_FILES[file_idx]
+        w_pawns = board.pieces(chess.PAWN, chess.WHITE) & file_mask
+        b_pawns = board.pieces(chess.PAWN, chess.BLACK) & file_mask
 
-    # LUÔN TRẢ VỀ GIÁ TRỊ (float)
-    return float(score)
+        w_cnt = len(w_pawns)
+        b_cnt = len(b_pawns)
+        if w_cnt > 1:
+            score -= 15 * (w_cnt - 1)
+        if b_cnt > 1:
+            score += 15 * (b_cnt - 1)
+
+        # Isolated pawns
+        adj_mask = 0
+        if file_idx > 0:
+            adj_mask |= chess.BB_FILES[file_idx - 1]
+        if file_idx < 7:
+            adj_mask |= chess.BB_FILES[file_idx + 1]
+
+        if w_pawns and not (board.pieces(chess.PAWN, chess.WHITE) & adj_mask):
+            score -= 20 * w_cnt
+        if b_pawns and not (board.pieces(chess.PAWN, chess.BLACK) & adj_mask):
+            score += 20 * b_cnt
+
+    return score

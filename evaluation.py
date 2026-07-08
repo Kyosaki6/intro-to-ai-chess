@@ -11,6 +11,7 @@ PIECE_VALUES = {
 }
 
 # ---------- PST TABLES ----------
+# Định dáng bảng trực quan: Rank 8 ở trên cùng (index 0), Rank 1 ở dưới cùng (index 56)
 PAWN_PST = [
      0,  0,  0,  0,  0,  0,  0,  0,
     50, 50, 50, 50, 50, 50, 50, 50,
@@ -66,17 +67,19 @@ QUEEN_PST = [
     -20,-10,-10, -5, -5,-10,-10,-20
 ]
 
+# ĐÃ SỬA: Bảng khai cuộc/trung cuộc chuẩn giúp Vua ẩn nấp ở góc nhập thành
 KING_PST_MIDGAME = [
-    -30,-20,-10,  0,  0,-10,-20,-30,
-    -20,-10,  0, 10, 10,  0,-10,-20,
-    -10,  0, 20, 30, 30, 20,  0,-10,
-      0, 10, 30, 40, 40, 30, 10,  0,
-      0, 10, 30, 40, 40, 30, 10,  0,
-    -10,  0, 20, 30, 30, 20,  0,-10,
-    -20,-10,  0, 10, 10,  0,-10,-20,
-    -30,-20,-10,  0,  0,-10,-20,-30
+    -30,-40,-40,-50,-50,-40,-40,-30, # Rank 8
+    -30,-40,-40,-50,-50,-40,-40,-30, # Rank 7
+    -30,-40,-40,-50,-50,-40,-40,-30, # Rank 6
+    -30,-40,-40,-50,-50,-40,-40,-30, # Rank 5
+    -20,-30,-30,-40,-40,-30,-30,-20, # Rank 4
+    -10,-20,-20,-20,-20,-20,-20,-10, # Rank 3
+     20, 20,  0,  0,  0,  0, 20, 20, # Rank 2
+     20, 30, 10,  0,  0, 10, 30, 20  # Rank 1 (Castling Zone)
 ]
 
+# King PST – Endgame (active in center)
 KING_PST_ENDGAME = [
     -50,-40,-30,-20,-20,-30,-40,-50,
     -30,-20,-10,  0,  0,-10,-20,-30,
@@ -108,7 +111,9 @@ def game_phase(board: chess.Board) -> float:
 
 # ---------- PST LOOKUP ----------
 def get_pst(piece_type: int, square: int, color: bool, phase: float) -> int:
-    idx = square if color == chess.WHITE else square ^ 56
+    # ĐÃ SỬA: Đảo ngược lại phép XOR để khớp với cách lưu mảng từ Rank 8 -> Rank 1
+    idx = square ^ 56 if color == chess.WHITE else square
+    
     if piece_type == chess.KING:
         mid = KING_PST_MIDGAME[idx]
         end = KING_PST_ENDGAME[idx]
@@ -118,7 +123,6 @@ def get_pst(piece_type: int, square: int, color: bool, phase: float) -> int:
 
 # ---------- MAIN EVALUATION ----------
 def evaluate_board(board: chess.Board) -> float:
-    # BẮT BUỘC GIỮ LẠI: Vì search.py gọi thẳng eval khi hết trận
     if board.is_checkmate():
         return -99999.0 if board.turn == chess.WHITE else 99999.0
     if board.is_stalemate() or board.is_insufficient_material():
@@ -127,12 +131,11 @@ def evaluate_board(board: chess.Board) -> float:
     phase = game_phase(board)
     score = 0.0
 
-    # Tối ưu trích xuất bitboard (Dùng len() thay vì .bit_count() để không lỗi SquareSet)
     w_pawns_all = board.pieces(chess.PAWN, chess.WHITE)
     b_pawns_all = board.pieces(chess.PAWN, chess.BLACK)
     all_pawns = w_pawns_all | b_pawns_all
 
-    # 1. Điểm lực lượng + Vị trí (Chấm điểm Tuyệt đối để khớp với Minimax trong search.py)
+    # 1. Điểm lực lượng + Vị trí (Điểm tuyệt đối cho Minimax)
     for square, piece in board.piece_map().items():
         val = PIECE_VALUES[piece.piece_type] + get_pst(piece.piece_type, square, piece.color, phase)
         score += val if piece.color == chess.WHITE else -val
@@ -175,8 +178,7 @@ def evaluate_board(board: chess.Board) -> float:
 
         if w_pawns and not (w_pawns_all & adj_mask):
             score -= 20 * w_cnt
-        if b_pawns and not (b_pawns_all & adj_mask):
+        if b_pawns and not (b_pawns_all & adj_files_mask if 'adj_files_mask' in locals() else b_pawns_all & adj_mask):
             score += 20 * b_cnt
 
-    # BẮT BUỘC: Trả về điểm tuyệt đối (score), bỏ phần nhân với lượt đi (Relative)
     return score

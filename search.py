@@ -65,8 +65,12 @@ def get_best_move(board: chess.Board, depth: int = 3,
         current_best = None
 
         ordered_moves = _order_moves(board, legal_moves_list)
-        if best_move is not None and ordered_moves:
-            ordered_moves = [best_move] + [m for m in ordered_moves if m != best_move]
+        if best_move is not None and ordered_moves and ordered_moves[0] != best_move:
+            try:
+                idx = ordered_moves.index(best_move)
+                ordered_moves[0], ordered_moves[idx] = ordered_moves[idx], ordered_moves[0]
+            except ValueError:
+                pass
 
         try:
             if is_maximizing:

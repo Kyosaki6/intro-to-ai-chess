@@ -6,6 +6,8 @@ from pyglet.text import Label
 from pyglet.window import key, mouse
 from pathlib import Path
 
+import threading
+
 from . import constants as C
 from . import audio
 from search import get_best_move
@@ -91,6 +93,7 @@ class ChessGUI(pyglet.window.Window):
         try:
             source = pyglet.media.load(str(path), streaming=True)
             self.music_player = pyglet.media.Player()
+            self.music_player.loop = True
             self.music_player.queue(source)
             self.music_player.volume = self.music_volume * 0.5
             self.music_player.play()
@@ -337,13 +340,19 @@ class ChessGUI(pyglet.window.Window):
         if self.board.is_game_over():
             self.ai_thinking = False
             return
-        move = get_best_move(self.board, depth=3, use_opening_book=self.use_opening_book)
+
+        def search_thread(board_copy):
+            move = get_best_move(board_copy, depth=3, use_opening_book=self.use_opening_book)
+            pyglet.clock.schedule_once(lambda dt: self._apply_ai_move(move), 0)
+
+        threading.Thread(target=search_thread, args=(self.board.copy(),), daemon=True).start()
+
+    def _apply_ai_move(self, move):
+        self.ai_thinking = False
         if move is None:
-            self.ai_thinking = False
             return
         captured = self.board.piece_at(move.to_square) is not None
         self.board.push(move)
-        self.ai_thinking = False
         self.move_count += 1
         self.selected_square = None
         self.legal_moves_for_selected.clear()
@@ -622,6 +631,7 @@ class ChessGUI(pyglet.window.Window):
             self.game_time = presets[(idx + 1) % len(presets)]
 
     def update(self, dt):
+        dt = min(dt, 1.0)
         if self.state == "menu":
             return
         if self.board.is_game_over():
@@ -749,12 +759,18 @@ class ChessGUI(pyglet.window.Window):
 
         m = self.redo_stack.pop()
         self.board.push(m)
-        self.move_count = len(self.board.move_stack)
-
-        self.selected_square = None
-        self.legal_moves_for_selected.clear()
         self.last_move_square = m.to_square
         self.last_move_from_sq = m.from_square
+
+        if self.mode == "pva" and self.redo_stack:
+            m2 = self.redo_stack.pop()
+            self.board.push(m2)
+            self.last_move_square = m2.to_square
+            self.last_move_from_sq = m2.from_square
+
+        self.move_count = len(self.board.move_stack)
+        self.selected_square = None
+        self.legal_moves_for_selected.clear()
 
     def draw_board(self):
         shapes.Rectangle(-8, -8, C.BOARD_PX + 16, C.BOARD_PX + 16, color=C.BORDER_OUTER).draw()
@@ -1140,6 +1156,7 @@ class ChessGUI(pyglet.window.Window):
     def _handle_promotion_click(self, x, y):
         sym = self._promotion_sym_at_pos(x, y)
         if sym is None:
+            self._clear_promotion()
             return
         promo_map = {"Q": chess.QUEEN, "R": chess.ROOK, "B": chess.BISHOP, "N": chess.KNIGHT}
         promo = promo_map.get(sym)
@@ -1244,13 +1261,16 @@ class ChessGUI(pyglet.window.Window):
                         self.editor_palette_piece = None
                         self.editor_selected_sq = None
                     elif btn["action"] in ("play_pvp", "play_pva"):
+                        if not self.board.is_valid():
+                            print("Bàn cờ không hợp lệ! (Thiếu/dư Vua hoặc sai lượt chiếu)")
+                            return
                         self.state = "game"
                         self.mode = "pvp" if btn["action"] == "play_pvp" else "pva"
                         self.selected_square = None
                         self.legal_moves_for_selected.clear()
                         self.move_count = 0
-                        self.time_white = 600.0
-                        self.time_black = 600.0
+                        self.time_white = float(self.game_time)
+                        self.time_black = float(self.game_time)
                         self.clock_running = True
                         self.draw_offered_by = None
                         self.game_result = None

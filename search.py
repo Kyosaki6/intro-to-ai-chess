@@ -1,9 +1,6 @@
 import chess
-from chess.polyglot import zobrist_hash
-import time
-from evaluation import evaluate_board, PIECE_VALUES
-from dataclasses import dataclass
-from typing import Optional
+from evaluation import evaluate_board
+from opening_book import get_opening_move
 
 
 class TimeoutException(Exception):
@@ -14,35 +11,14 @@ TT: dict = {}
 NODES_SEARCHED = 0
 
 
-@dataclass
-class TTEntry:
-    depth: int
-    score: float
-    flag: str
-    best_move: Optional[chess.Move]
+def get_best_move(board: chess.Board, depth: int = 3, use_opening_book: bool = True) -> chess.Move | None:
+    global NODES_SEARCHED
 
+    if use_opening_book and not board.is_game_over():
+        book_move = get_opening_move(board)
+        if book_move is not None:
+            return book_move
 
-def _order_moves(board, moves):
-    def _score(move):
-        score = 0
-        if board.is_capture(move):
-            attacker = board.piece_at(move.from_square)
-            a_val = PIECE_VALUES[attacker.piece_type] if attacker else 0
-            if board.is_en_passant(move):
-                victim_val = PIECE_VALUES[chess.PAWN]
-            else:
-                victim = board.piece_at(move.to_square)
-                victim_val = PIECE_VALUES[victim.piece_type] if victim else 0
-            score = 10000 + victim_val * 10 - a_val
-        if move.promotion:
-            score += 5000 + PIECE_VALUES[move.promotion]
-        return score
-    return sorted(moves, key=_score, reverse=True)
-
-
-def get_best_move(board: chess.Board, depth: int = 3,
-                  time_limit: float | None = None) -> chess.Move | None:
-    global NODES_SEARCHED, TT
     NODES_SEARCHED = 0
     if len(TT) > 1000000:
         TT.clear()

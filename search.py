@@ -1,5 +1,9 @@
 import chess
-from evaluation import evaluate_board
+from chess.polyglot import zobrist_hash
+import time
+from evaluation import evaluate_board, PIECE_VALUES
+from dataclasses import dataclass
+from typing import Optional
 from opening_book import get_opening_move
 
 
@@ -7,11 +11,35 @@ class TimeoutException(Exception):
     pass
 
 
+@dataclass
+class TTEntry:
+    depth: int
+    score: float
+    flag: str
+    best_move: chess.Move | None = None
+
+
 TT: dict = {}
 NODES_SEARCHED = 0
 
 
-def get_best_move(board: chess.Board, depth: int = 3, use_opening_book: bool = True) -> chess.Move | None:
+def _order_moves(board: chess.Board, moves: list[chess.Move]) -> list[chess.Move]:
+    def move_key(move):
+        score = 0
+        if board.is_capture(move):
+            victim = board.piece_at(move.to_square)
+            if victim:
+                score += 10 * PIECE_VALUES.get(victim.piece_type, 0)
+                attacker = board.piece_at(move.from_square)
+                if attacker:
+                    score -= PIECE_VALUES.get(attacker.piece_type, 0)
+        if move.promotion:
+            score += PIECE_VALUES.get(move.promotion, 0)
+        return score
+    return sorted(moves, key=move_key, reverse=True)
+
+
+def get_best_move(board: chess.Board, depth: int = 3, use_opening_book: bool = True, time_limit: float | None = None) -> chess.Move | None:
     global NODES_SEARCHED
 
     if use_opening_book and not board.is_game_over():

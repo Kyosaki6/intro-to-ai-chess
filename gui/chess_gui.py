@@ -87,9 +87,7 @@ class ChessGUI(pyglet.window.Window):
                 self.sounds[key] = None
 
     def _init_background_music(self):
-        path = self.sounds_dir / "background.wav"
-        if not path.exists():
-            audio.make_background_wav(str(path))
+        path = self.sounds_dir / "nhacnen.mp3"
         try:
             source = pyglet.media.load(str(path), streaming=True)
             self.music_player = pyglet.media.Player()

@@ -4,7 +4,7 @@ import chess
 import search
 
 
-ENGINE_NAME = "ChessAI-Minimax"
+ENGINE_NAME = "DC Engine"
 ENGINE_AUTHOR = "IntroAI"
 DEFAULT_DEPTH = 3
 MAX_MOVES_ESTIMATE = 40

@@ -178,7 +178,7 @@ def evaluate_board(board: chess.Board) -> float:
 
         if w_pawns and not (w_pawns_all & adj_mask):
             score -= 20 * w_cnt
-        if b_pawns and not (b_pawns_all & adj_files_mask if 'adj_files_mask' in locals() else b_pawns_all & adj_mask):
+        if b_pawns and not (b_pawns_all & adj_mask):
             score += 20 * b_cnt
 
     return score

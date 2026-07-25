@@ -181,4 +181,14 @@ def evaluate_board(board: chess.Board) -> float:
         if b_pawns and not (b_pawns_all & adj_mask):
             score += 20 * b_cnt
 
+    # 5. Bishop blocking center pawn penalty
+    if board.piece_at(chess.D2) == chess.Piece(chess.PAWN, chess.WHITE) and board.piece_at(chess.D3) == chess.Piece(chess.BISHOP, chess.WHITE):
+        score -= 20
+    if board.piece_at(chess.E2) == chess.Piece(chess.PAWN, chess.WHITE) and board.piece_at(chess.E3) == chess.Piece(chess.BISHOP, chess.WHITE):
+        score -= 20
+    if board.piece_at(chess.D7) == chess.Piece(chess.PAWN, chess.BLACK) and board.piece_at(chess.D6) == chess.Piece(chess.BISHOP, chess.BLACK):
+        score += 20
+    if board.piece_at(chess.E7) == chess.Piece(chess.PAWN, chess.BLACK) and board.piece_at(chess.E6) == chess.Piece(chess.BISHOP, chess.BLACK):
+        score += 20
+
     return score

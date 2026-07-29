@@ -13,10 +13,10 @@ Chess AI project — coursework for **Introduction to Artificial Intelligence** 
 - Undo/Redo (Z/X keys), ESC to quit
 
 ### AI Engine
-- **Search:** Minimax with Alpha-Beta pruning, Iterative Deepening, Zobrist Transposition Table, Quiescence Search (max 4 ply, delta pruning)
+- **Search:** Minimax with Alpha-Beta pruning, Iterative Deepening, Zobrist Transposition Table, Quiescence Search (TT, checks, delta pruning, max 4 ply)
 - **Move ordering:** MVV-LVA (Most Valuable Victim - Least Valuable Attacker), TT best move promotion
 - **Time management:** 95% hard deadline, 80% soft break for iterative deepening
-- **Evaluation:** Material + Piece-Square Tables (PST), tapered game phase eval for King, Bishop pair (+40), Rook on open file (+20), Doubled pawn penalty (-15), Isolated pawn penalty (-20)
+- **Evaluation:** Material + Piece-Square Tables (PST), tapered game phase eval for King, Bishop pair (+40), Rook on open file (+20), Doubled pawn penalty (-15), Isolated pawn penalty (-20), Bishop blocking center pawn penalty (-20)
 - **Opening book:** Built-in book (~25 positions) + Polyglot `.bin` support
 
 ### UCI Protocol

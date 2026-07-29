@@ -193,71 +193,109 @@ def quiescence_search(board: chess.Board, alpha: float, beta: float,
     if NODES_SEARCHED & 0x3FF == 0 and time.time() > deadline:
         raise TimeoutException
 
+    key = zobrist_hash(board)
+    tt_entry = TT.get(key)
+    if tt_entry and tt_entry.depth == 0:
+        if tt_entry.flag == "exact":
+            return tt_entry.score
+        elif tt_entry.flag == "lower" and tt_entry.score > alpha:
+            alpha = tt_entry.score
+        elif tt_entry.flag == "upper" and tt_entry.score < beta:
+            beta = tt_entry.score
+        if alpha >= beta:
+            return tt_entry.score
+
     if board.is_game_over():
         if board.is_checkmate():
-            return -99999 + ply if board.turn == chess.WHITE else 99999 - ply
+            result = -99999 + ply if board.turn == chess.WHITE else 99999 - ply
+            TT[key] = TTEntry(0, result, "exact")
+            return result
+        TT[key] = TTEntry(0, 0.0, "exact")
         return 0
 
-    if ply > MAX_Q_PLY:
-        return evaluate_board(board)
+    if ply >= MAX_Q_PLY:
+        result = evaluate_board(board)
+        TT[key] = TTEntry(0, result, "exact")
+        return result
 
-    stand_pat = evaluate_board(board)
+    if board.is_check():
+        moves = [m for m in board.legal_moves]
+    else:
+        moves = [m for m in board.legal_moves if board.is_capture(m) or m.promotion or board.gives_check(m)]
+
+    moves = _order_moves(board, moves)
 
     if is_maximizing:
+        stand_pat = evaluate_board(board)
+
         if stand_pat >= beta:
+            TT[key] = TTEntry(0, stand_pat, "lower")
             return beta
         if stand_pat > alpha:
             alpha = stand_pat
 
-        captures = [m for m in board.legal_moves if board.is_capture(m) or m.promotion]
-        captures = _order_moves(board, captures)
-        for move in captures:
-            attacker = board.piece_at(move.from_square)
-            if board.is_en_passant(move):
-                victim_val = PIECE_VALUES[chess.PAWN]
-            else:
-                victim = board.piece_at(move.to_square)
-                victim_val = PIECE_VALUES[victim.piece_type] if victim else 0
-            gain = PIECE_VALUES[move.promotion] if move.promotion else 0
-            if stand_pat + victim_val + gain + DELTA_MARGIN < alpha:
-                continue
-            if victim_val > 0 and attacker and victim_val < PIECE_VALUES[attacker.piece_type]:
-                if stand_pat + PIECE_VALUES[chess.PAWN] < alpha:
+        best_move_in_node = None
+        for move in moves:
+            if board.is_capture(move) or move.promotion:
+                attacker = board.piece_at(move.from_square)
+                if board.is_en_passant(move):
+                    victim_val = PIECE_VALUES[chess.PAWN]
+                else:
+                    victim = board.piece_at(move.to_square)
+                    victim_val = PIECE_VALUES[victim.piece_type] if victim else 0
+                gain = PIECE_VALUES[move.promotion] if move.promotion else 0
+                if stand_pat + victim_val + gain + DELTA_MARGIN < alpha:
                     continue
+                if victim_val > 0 and attacker and victim_val < PIECE_VALUES[attacker.piece_type]:
+                    if stand_pat + PIECE_VALUES[chess.PAWN] < alpha:
+                        continue
+
             board.push(move)
             score = quiescence_search(board, alpha, beta, False, ply + 1, deadline)
             board.pop()
             if score >= beta:
+                TT[key] = TTEntry(0, score, "lower", best_move_in_node)
                 return beta
             if score > alpha:
                 alpha = score
+                best_move_in_node = move
+
+        TT[key] = TTEntry(0, alpha, "exact", best_move_in_node)
         return alpha
     else:
+        stand_pat = evaluate_board(board)
+
         if stand_pat <= alpha:
+            TT[key] = TTEntry(0, stand_pat, "upper")
             return alpha
         if stand_pat < beta:
             beta = stand_pat
 
-        captures = [m for m in board.legal_moves if board.is_capture(m) or m.promotion]
-        captures = _order_moves(board, captures)
-        for move in captures:
-            attacker = board.piece_at(move.from_square)
-            if board.is_en_passant(move):
-                victim_val = PIECE_VALUES[chess.PAWN]
-            else:
-                victim = board.piece_at(move.to_square)
-                victim_val = PIECE_VALUES[victim.piece_type] if victim else 0
-            gain = PIECE_VALUES[move.promotion] if move.promotion else 0
-            if stand_pat - victim_val - gain - DELTA_MARGIN > beta:
-                continue
-            if victim_val > 0 and attacker and victim_val < PIECE_VALUES[attacker.piece_type]:
-                if stand_pat - PIECE_VALUES[chess.PAWN] > beta:
+        best_move_in_node = None
+        for move in moves:
+            if board.is_capture(move) or move.promotion:
+                attacker = board.piece_at(move.from_square)
+                if board.is_en_passant(move):
+                    victim_val = PIECE_VALUES[chess.PAWN]
+                else:
+                    victim = board.piece_at(move.to_square)
+                    victim_val = PIECE_VALUES[victim.piece_type] if victim else 0
+                gain = PIECE_VALUES[move.promotion] if move.promotion else 0
+                if stand_pat - victim_val - gain - DELTA_MARGIN > beta:
                     continue
+                if victim_val > 0 and attacker and victim_val < PIECE_VALUES[attacker.piece_type]:
+                    if stand_pat - PIECE_VALUES[chess.PAWN] > beta:
+                        continue
+
             board.push(move)
             score = quiescence_search(board, alpha, beta, True, ply + 1, deadline)
             board.pop()
             if score <= alpha:
+                TT[key] = TTEntry(0, score, "upper", best_move_in_node)
                 return alpha
             if score < beta:
                 beta = score
+                best_move_in_node = move
+
+        TT[key] = TTEntry(0, beta, "exact", best_move_in_node)
         return beta

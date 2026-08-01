@@ -59,15 +59,21 @@ python main.py
 
 ## Elo Test Results
 
-DC Engine depth=3 vs Stockfish UCI_Elo=1320 (20 games, tc=60+0.5):
+DC Engine depth=3 vs Stockfish UCI_Elo=1320 (100 games, tc=60+0.5):
 
 | Result | Games |
 |--------|-------|
-| DC wins | 3 |
-| Draws | 0 |
-| Stockfish wins | 17 |
+| DC wins | 25 |
+| Draws | 8 |
+| Stockfish wins | 67 |
 
-Win rate: **15%** — DC Engine may be weaker than 1320 Elo.
+Win rate: **29%** — Elo difference **-155.5 +/- 72.8**, LOS 0.0%, DrawRatio 8.0%.
+
+By color (DC Engine):
+- As White: 15 wins / 5 draws / 30 losses (35%)
+- As Black: 10 wins / 3 draws / 37 losses (23%)
+
+DC Engine remains weaker than 1320 Elo; see [DC Engine v1.2 release](https://github.com/Kyosaki6/intro-to-ai-chess/releases) for feature notes.
 
 ## Info
 
